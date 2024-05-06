@@ -81,7 +81,9 @@ class MAPPO(OnPolicyBase):
 
         self.actor_optimizer.zero_grad()
 
+        # # 添加diversity term
         (policy_loss - dist_entropy * self.entropy_coef).backward()
+        # policy_loss.backward()
 
         if self.use_max_grad_norm:
             actor_grad_norm = nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
