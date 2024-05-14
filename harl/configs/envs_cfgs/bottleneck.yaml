@@ -1,5 +1,5 @@
 scenario: bottleneck
-task: rmappo_5_0.5
+task: rmappo_4_0.2
 
 sumo_cfg: "env_utils/bottleneck_map_small/scenario.sumocfg"
 max_num_seconds: 200
@@ -8,8 +8,8 @@ use_gui: False
 
 # for veh wrapper
 scene_name: "Env_Bottleneck"
-num_CAVs: 5  # num_CAVs/penetration_CAV should be an integer multiple of 10, except for penetration_CAV=1
-penetration_CAV: 0.5 # only 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1 are valid
+num_CAVs: 4  # num_CAVs/penetration_CAV should be an integer multiple of 10, except for penetration_CAV=1
+penetration_CAV: 0.2 # only 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1 are valid
 warmup_steps: 0
 edge_ids: [ 'E0', 'E1', 'E2', 'E3', 'E4', ]
 edge_lane_num: { 'E0': 4,
@@ -38,5 +38,6 @@ aggressive: 0.2
 cautious: 0.2
 normal: 0.6
 
+# 5_0.5: 0.1 + 40
 save_collision: 0.1
-save_episode_step: 40
+save_episode_step: 150

@@ -129,15 +129,17 @@ class VehEnvWrapper(gym.Wrapper):
     @property
     def observation_space(self):
         obs_space = gym.spaces.Box(
-            low=-np.inf, high=np.inf, shape=(435,)  # FIXED #TODO: 是否需要修改一下他的区间 inf
-        )
+            # low=-np.inf, high=np.inf, shape=(435,)  # FIXED #TODO: 是否需要修改一下他的区间 inf
+            low=-np.inf, high=np.inf, shape=(105,)
+        ) # 435 is the length of the ITSC version
         return {_ego_id: obs_space for _ego_id in self.ego_ids}
 
     @property
     def share_observation_space(self):
         share_obs_space = gym.spaces.Box(
-            low=-np.inf, high=np.inf, shape=(435,)
-        )
+            # low=-np.inf, high=np.inf, shape=(435,)
+            low=-np.inf, high=np.inf, shape=(105,)
+        ) # 435 is the length of the ITSC version
         return {_ego_id: share_obs_space for _ego_id in self.ego_ids}
 
     # ##################
@@ -145,7 +147,186 @@ class VehEnvWrapper(gym.Wrapper):
     # ##################
     def append_surrounding(self, state):
         surrounding_vehicles = {}
+        sorrounding_vehicles_expand = {}
         """
+                    ^ y (+)
+                    |
+                    |
+        x(-) <------------> x (+)
+                    | 
+                    |
+                    v y (-)
+
+        [surround_vehicle_id, relative x, relative y, relative speed]
+        """
+        for vehicle_id in state['vehicle'].keys():
+            # 对于所有RL控制的车辆
+            if vehicle_id in self.ego_ids:
+                if self.use_gui:
+                    import traci as traci
+                else:
+                    import libsumo as traci
+                surrounding_vehicle = {}
+                sorrounding_vehicle_expand = {}
+
+                modes_follow = {
+                    'left_followers': 0b000,  # Left and followers
+                    'right_followers': 0b001,  # Left and leaders
+                }
+                # ego车的左右车道的后面的车辆
+                for key, mode in modes_follow.items():
+                    neighbors = traci.vehicle.getNeighbors(vehicle_id, mode)
+                    for n in neighbors:
+                        if key == 'left_followers':
+                            lateral_dist = 3.2
+                        else:
+                            lateral_dist = -3.2
+                        # 相对速度 - ego车的速度 - 后车的速度的差值
+                        relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(n[0])
+                        if n[0][:3] == 'HDV':
+                            # traci得到的距离是ego到后车头部减去minGap的距离，所以要加上minGap（此时后车是HDV）
+                            # 3.2是lane的宽度，1.5是HDV的minGap
+                            long_dist = n[1] + 1.5
+                            surrounding_vehicle[key] = (n[0], -(long_dist), lateral_dist, relative_speed)
+                            sorrounding_vehicle_expand[key] = (n[0], -(long_dist), lateral_dist, relative_speed)
+                        elif n[0][:3] == 'CAV':
+                            # traci得到的距离是ego到后车头部减去minGap的距离，所以要加上minGap（此时后车是CAV）
+                            # 3.2是lane的宽度，1.0是CAV的minGap
+                            long_dist = n[1] + 1.0
+                            surrounding_vehicle[key] = (n[0], -(long_dist), lateral_dist, relative_speed)
+                            sorrounding_vehicle_expand[key] = (n[0], -(long_dist), lateral_dist, relative_speed)
+                        else:
+                            raise ValueError('Unknown vehicle type')
+                        neighbors_expand = traci.vehicle.getFollower(n[0])
+                        if neighbors_expand not in [None, ()] and neighbors_expand[0] != '':
+                            relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(neighbors_expand[0])
+                            if neighbors_expand[0][:3] == 'HDV':
+                                sorrounding_vehicle_expand[key+'_expand'] = (neighbors_expand[0], -(neighbors_expand[1] + 1.5 + 5 + long_dist),
+                                                                             lateral_dist, relative_speed)
+                            elif neighbors_expand[0][:3] == 'CAV':
+                                sorrounding_vehicle_expand[key+'_expand'] = (neighbors_expand[0], -(neighbors_expand[1] + 1.0 + 5 + long_dist),
+                                                                             lateral_dist, relative_speed)
+                            else:
+                                raise ValueError('Unknown vehicle type')
+
+                modes_lead = {
+                    'left_leaders': 0b010,  # Right and followers
+                    'right_leaders': 0b011  # Right and leaders
+                }
+                # ego车的左右车道的前面的车辆
+                for key, mode in modes_lead.items():
+                    neighbors = traci.vehicle.getNeighbors(vehicle_id, mode)
+                    if key == 'left_leaders':
+                        lateral_dist = 3.2
+                    else:
+                        lateral_dist = -3.2
+                    for n in neighbors:
+                        # 相对速度 - ego车的速度 - 前车的速度的差值
+                        relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(n[0])
+                        long_dist = n[1] + 1.0
+                        surrounding_vehicle[key] = (n[0], long_dist, lateral_dist, relative_speed)
+                        sorrounding_vehicle_expand[key] = (n[0], long_dist, lateral_dist, relative_speed)
+                        # traci得到的距离是ego到前车尾部减去minGap的距离，所以要加上minGap（此时后车是ego）
+                        # 3.2是lane的宽度，1.0是CAV的minGap
+                        neighbors_expand = traci.vehicle.getLeader(n[0])
+                        if neighbors_expand not in [None, ()] and neighbors_expand[0] != '':
+                            relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(neighbors_expand[0])
+                            if n[0][:3] == 'HDV':
+                                sorrounding_vehicle_expand[key + '_expand'] = (neighbors_expand[0], neighbors_expand[1] + 1.5 + 5 + long_dist,
+                                                                               lateral_dist, relative_speed)
+                            elif n[0][:3] == 'CAV':
+                                sorrounding_vehicle_expand[key + '_expand'] = (neighbors_expand[0], neighbors_expand[1] + 1.0 + 5 + long_dist,
+                                                                               lateral_dist, relative_speed)
+
+                # 在当前车道上的前车
+                front_vehicle = traci.vehicle.getLeader(vehicle_id)
+                if front_vehicle not in [None, ()] and front_vehicle[0] != '':  # 有可能是空的
+                    front_vehicle_lane = traci.vehicle.getLaneID(front_vehicle[0])
+                    front_vehicle_lane_index = int(front_vehicle_lane.split('_')[-1])
+                    front_vehicle_road_id = front_vehicle_lane.split('_')[0]
+
+                    ego_lane = state['vehicle'][vehicle_id]['lane_id']
+                    ego_lane_index = int(ego_lane.split('_')[-1])
+                    ego_road_id = ego_lane.split('_')[0]
+                    # if front_vehicle_road_id[:3] == ':J3' or ego_road_id[:3] == ':J3':
+                    #     print('debug')
+                    if front_vehicle_lane_index != ego_lane_index:
+                        pass
+                    else:
+                        # 相对速度 - ego车的速度 - 前车的速度的差值
+                        relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(front_vehicle[0])
+                        long_dist = front_vehicle[1] + 1.0
+                        surrounding_vehicle['front'] = (front_vehicle[0], long_dist, 0, relative_speed)
+                        sorrounding_vehicle_expand['front'] = (front_vehicle[0], long_dist, 0, relative_speed)
+                        front_vehicle_expand = traci.vehicle.getLeader(front_vehicle[0])
+                        # traci得到的距离是ego到前车尾部减去minGap的距离，所以要加上minGap（此时后车是ego）
+                        if front_vehicle[0][:3] == 'HDV':
+                            if front_vehicle_expand not in [None, ()] and front_vehicle_expand[0] != '':
+                                relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(front_vehicle_expand[0])
+                                sorrounding_vehicle_expand['front_expand'] = (front_vehicle_expand[0], front_vehicle_expand[1] + 1.5 + 5 + long_dist,
+                                                                              0, relative_speed)
+                        elif front_vehicle[0][:3] == 'CAV':
+                            if front_vehicle_expand not in [None, ()] and front_vehicle_expand[0] != '':
+                                relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(front_vehicle_expand[0])
+                                sorrounding_vehicle_expand['front_expand'] = (front_vehicle_expand[0], front_vehicle_expand[1] + 1.0 + 5 + long_dist,
+                                                                              0, relative_speed)
+                        else:
+                            raise ValueError('Unknown vehicle type')
+
+                # 在当前车道上的后车
+                back_vehicle = traci.vehicle.getFollower(vehicle_id)
+                if back_vehicle not in [None, ()] and back_vehicle[0] != '':  # 有可能是空的
+                    back_vehicle_lane = traci.vehicle.getLaneID(back_vehicle[0])
+                    back_vehicle_lane_index = int(back_vehicle_lane.split('_')[-1])
+                    back_vehicle_road_id = back_vehicle_lane.split('_')[0]
+
+                    ego_lane = state['vehicle'][vehicle_id]['lane_id']
+                    ego_lane_index = int(ego_lane.split('_')[-1])
+                    ego_road_id = ego_lane.split('_')[0]
+
+                    if back_vehicle_lane_index != ego_lane_index:
+                        # if back_vehicle_lane != ego_lane:
+                        pass
+                    else:
+                        # 相对速度 - ego车的速度 - 后车的速度的差值
+                        relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(back_vehicle[0])
+                        if back_vehicle[0][:3] == 'HDV':
+                            long_dist = back_vehicle[1] + 1.5
+                            # traci得到的距离是ego到后车头部减去minGap的距离，所以要加上minGap（此时后车是HDV）
+                            surrounding_vehicle['back'] = (back_vehicle[0], -(long_dist), 0, relative_speed)
+                            sorrounding_vehicle_expand['back'] = (back_vehicle[0], -(long_dist), 0, relative_speed)
+                        elif back_vehicle[0][:3] == 'CAV':
+                            long_dist = back_vehicle[1] + 1.0
+                            # traci得到的距离是ego到后车头部减去minGap的距离，所以要加上minGap（此时后车是CAV）
+                            surrounding_vehicle['back'] = (back_vehicle[0], -(long_dist), 0, relative_speed)
+                            sorrounding_vehicle_expand['back'] = (back_vehicle[0], -(long_dist), 0, relative_speed)
+                        else:
+                            raise ValueError('Unknown vehicle type')
+                        back_vehicle_expand = traci.vehicle.getFollower(back_vehicle[0])
+                        if back_vehicle_expand not in [None, ()] and back_vehicle_expand[0] != '':
+                            relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(back_vehicle_expand[0])
+                            if back_vehicle_expand[0][:3] == 'HDV':
+                                sorrounding_vehicle_expand['back_expand'] = (back_vehicle_expand[0], -(back_vehicle_expand[1] + 1.5 + 5 + long_dist),
+                                                                             0, relative_speed)
+                            elif back_vehicle_expand[0][:3] == 'CAV':
+                                sorrounding_vehicle_expand['back_expand'] = (back_vehicle_expand[0], -(back_vehicle_expand[1] + 1.0 + 5 + long_dist),
+                                                                             0, relative_speed)
+                            else:
+                                raise ValueError('Unknown vehicle type')
+
+                surrounding_vehicles[vehicle_id] = surrounding_vehicle
+                sorrounding_vehicles_expand[vehicle_id] = sorrounding_vehicle_expand
+
+                pass
+        for vehicle_id in surrounding_vehicles.keys():
+            state['vehicle'][vehicle_id]['surround'] = surrounding_vehicles[vehicle_id]
+            state['vehicle'][vehicle_id]['surround_expand'] = sorrounding_vehicles_expand[vehicle_id]
+
+        return state
+
+    def append_surrounding_ITSCversion(self, state):
+        surrounding_vehicles = {}
+        """ append_surrounding(ITSC version)
         ^ x (-)
         |
         |
@@ -395,10 +576,18 @@ class VehEnvWrapper(gym.Wrapper):
         all_ego_vehicle_speed = []  # CAV车辆的平均速度 - 使用target speed
         all_ego_vehicle_mean_speed = []  # CAV车辆的累积平均速度 - 使用速度/时间
         all_ego_vehicle_accumulated_waiting_time = []  # # CAV车辆的累积平均等待时间
+        all_ego_vehicle_waiting_time = []  # CAV车辆的等待时间
+        all_ego_vehicle_position_x = []  # CAV车辆的位置
 
         all_vehicle_speed = []  # CAV和HDV车辆的平均速度 - 使用target speed
         all_vehicle_mean_speed = []  # CAV和HDV车辆的累积平均速度 - 使用速度/时间
         all_vehicle_accumulated_waiting_time = []  # CAV和HDV车辆的累积平均等待时间
+        all_vehicle_waiting_time = []  # CAV和HDV车辆的等待时间
+        all_vehicle_position_x = []  # CAV和HDV车辆的位置
+
+        range_vehicle_speed = []  # bottleneck+ 区域的车辆的速度
+        range_vehicle_waiting_time = []  # bottleneck+ 区域的车辆的等待时间
+        range_vehicle_accumulated_waiting_time = []  # bottleneck+ 区域的车辆的累积等待时间
 
         for veh_id, (veh_travel_time, road_id, distance, speed, position_x,
                      position_y, waiting_time, accumulated_waiting_time) in list(self.vehicles_info.items()):
@@ -407,6 +596,12 @@ class VehEnvWrapper(gym.Wrapper):
             all_vehicle_speed.append(speed)
             all_vehicle_mean_speed.append(distance / veh_travel_time)
             all_vehicle_accumulated_waiting_time.append(accumulated_waiting_time)
+            all_vehicle_waiting_time.append(waiting_time)
+            all_vehicle_position_x.append(position_x)
+            if road_id in self.bottle_necks + ['E2', 'E3']:
+                range_vehicle_speed.append(speed)
+                range_vehicle_waiting_time.append(waiting_time)
+                range_vehicle_accumulated_waiting_time.append(accumulated_waiting_time)
 
             # 把CAV单独取出来
             if veh_id in self.ego_ids:
@@ -415,19 +610,27 @@ class VehEnvWrapper(gym.Wrapper):
                 all_ego_vehicle_speed.append(speed)
                 all_ego_vehicle_mean_speed.append(distance / veh_travel_time)
                 all_ego_vehicle_accumulated_waiting_time.append(accumulated_waiting_time)
+                all_ego_vehicle_waiting_time.append(waiting_time)
+                all_ego_vehicle_position_x.append(position_x)
 
                 # ######################## for individual reward ########################
                 # # CAV车辆的累积平均速度越靠近最大速度，reward越高 - [0, 5]
-                # individual_speed_r = -abs(distance / veh_travel_time - max_speed) / max_speed * 5 + 5
-                # inidividual_rew_ego[veh_id] += individual_speed_r
+                individual_speed_r = -abs(distance / veh_travel_time - max_speed) / max_speed * 5 + 5
+                inidividual_rew_ego[veh_id] += 1 * individual_speed_r
 
                 # CAV车辆的target速度越靠近最大速度，reward越高 - [0, 5]
                 individual_speed_r_simple = -abs(speed - max_speed) / max_speed * 5 + 5
-                inidividual_rew_ego[veh_id] += individual_speed_r_simple
+                inidividual_rew_ego[veh_id] += individual_speed_r_simple * 1
 
-                # # CAV车辆的等待时间越短，reward越高 - [0, 5]
-                # individual_waiting_time_r = -accumulated_waiting_time / 10
-                # inidividual_rew_ego[veh_id] += individual_waiting_time_r
+                # # CAV车辆的等待时间越短，reward越高 - (-infty,0]
+                # individual_accumulated_waiting_time_r = -accumulated_waiting_time
+                # inidividual_rew_ego[veh_id] += individual_accumulated_waiting_time_r
+                individual_waiting_time_r = -waiting_time
+                inidividual_rew_ego[veh_id] += individual_waiting_time_r * 1
+
+                ## reward is higher when the vehicle is closer to the end of the road
+                individual_position_r = position_x / self.bottle_neck_positions[0]
+                inidividual_rew_ego[veh_id] += individual_position_r * 1
 
                 # 警告距离和碰撞距离
                 if veh_id in self.warn_ego_ids.keys():
@@ -436,14 +639,14 @@ class VehEnvWrapper(gym.Wrapper):
                         # CAV车辆的警告距离越远，reward越高 - [0, 5]
                         individual_warn_r += -(WARN_GAP_THRESHOLD - dis) / (
                                 WARN_GAP_THRESHOLD - GAP_THRESHOLD) * 10  # [-10, 0]
-                    inidividual_rew_ego[veh_id] += individual_warn_r * 0.25
+                    inidividual_rew_ego[veh_id] += individual_warn_r * 0.5
 
                 if veh_id in self.coll_ego_ids.keys():
                     individual_coll_r = 0
                     for dis in self.coll_ego_ids[veh_id]:
                         # CAV车辆的碰撞距离越远，reward越高 - [0, 5]
                         individual_coll_r += -(GAP_THRESHOLD - dis) / GAP_THRESHOLD * 20 - 10  # [-30, -10]
-                    inidividual_rew_ego[veh_id] += individual_coll_r * 0.25
+                    inidividual_rew_ego[veh_id] += individual_coll_r * 0.5
 
                 # 计算局部地区的reward
                 if road_id in self.bottle_necks + ['E3', 'E2', 'E1', 'E0']:
@@ -453,28 +656,39 @@ class VehEnvWrapper(gym.Wrapper):
                 else:
                     range_reward_ego[veh_id] = 0
 
+
         # 计算全局reward
         all_ego_vehicle_speed = np.mean(all_ego_vehicle_speed)  # CAV车辆的平均速度 - 使用target speed
         all_ego_mean_speed = np.mean(all_ego_vehicle_mean_speed)  # CAV车辆的累积平均速度 - 使用速度/时间
         all_ego_vehicle_accumulated_waiting_time = np.mean(all_ego_vehicle_accumulated_waiting_time)  # CAV车辆的累积平均等待时间
+        all_ego_vehicle_waiting_time = np.mean(all_ego_vehicle_waiting_time)  # CAV车辆的mean等待时间
+        all_ego_vehicle_position_x = np.mean(all_ego_vehicle_position_x)  # CAV车辆的位置
 
         all_vehicle_speed = np.mean(all_vehicle_speed)  # CAV和HDV车辆的平均速度 - 使用target speed
         all_vehicle_mean_speed = np.mean(all_vehicle_mean_speed)  # CAV和HDV车辆的累积平均速度 - 使用速度/时间
         all_vehicle_accumulated_waiting_time = np.mean(all_vehicle_accumulated_waiting_time)  # CAV和HDV车辆的累积平均等待时间
-
-        # global_speed_pure_r = -abs(all_ego_vehicle_speed - max_speed) / max_speed * 5 + 5
-        # global_speed_r = -abs(all_vehicle_mean_speed - max_speed) / max_speed * 5 + 5
-        # global_ego_speed_r = -abs(all_ego_mean_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
-        # global_waiting_time_r = -all_vehicle_accumulated_waiting_time / 10
-        # global_ego_waiting_time_r = -all_ego_vehicle_accumulated_waiting_time / 10  # [0, 5]
+        all_vehicle_waiting_time = np.mean(all_vehicle_waiting_time)  # CAV和HDV车辆的mean等待时间
+        all_vehicle_position_x = np.mean(all_vehicle_position_x)  # CAV和HDV车辆的位置
 
         global_ego_speed_r = -abs(all_ego_vehicle_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
         global_ego_mean_speed_r = -abs(all_ego_mean_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
-        global_ego_waiting_time_r = -all_ego_vehicle_accumulated_waiting_time / 10  # [0, 5]
+        global_ego_accumulated_waiting_time_r = -all_ego_vehicle_accumulated_waiting_time   # (-infty,0]
+        global_ego_waiting_time_r = -all_ego_vehicle_waiting_time   # (-infty,0]
+        global_ego_position_x_r = all_ego_vehicle_position_x / self.bottle_neck_positions[0]
 
-        # global_all_speed_r = -abs(all_vehicle_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
-        # global_all_mean_speed_r = -abs(all_vehicle_mean_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
-        # global_all_waiting_time_r = -all_vehicle_accumulated_waiting_time / 10  # [0, 5]
+        global_all_speed_r = -abs(all_vehicle_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
+        global_all_mean_speed_r = -abs(all_vehicle_mean_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
+        global_all_accumulated_waiting_time_r = -all_vehicle_accumulated_waiting_time   # [0, 5]
+        global_all_waiting_time_r = -all_vehicle_waiting_time   # (-infty,0]
+        global_all_position_x_r = all_vehicle_position_x / self.bottle_neck_positions[0]
+
+        range_vehicle_speed = np.mean(range_vehicle_speed) if range_vehicle_speed != [] else 0  # bottleneck+ 区域的车辆的速度
+        range_vehicle_waiting_time = np.mean(range_vehicle_waiting_time) if range_vehicle_waiting_time != [] else 0  # bottleneck+ 区域的车辆的等待时间
+        range_vehicle_accumulated_waiting_time = np.mean(range_vehicle_accumulated_waiting_time) if range_vehicle_accumulated_waiting_time != [] else 0  # bottleneck+ 区域的车辆的累积等待时间
+
+        range_vehs_speed_r = -abs(range_vehicle_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
+        range_vehs_waiting_time_r = -range_vehicle_waiting_time   # (-infty,0]
+        range_vehs_accumulated_waiting_time_r = -range_vehicle_accumulated_waiting_time   # (-infty,0]
 
         time_penalty = -1
 
@@ -487,13 +701,20 @@ class VehEnvWrapper(gym.Wrapper):
         #               global_ego_speed_r + global_ego_waiting_time_r for key in inidividual_rew_ego}
 
         rewards = {key: inidividual_rew_ego[key] \
-                        # + range_reward_ego[key] \
+                        + range_reward_ego[key] \
                         + global_ego_speed_r \
                         # + global_ego_mean_speed_r \
                         # + global_ego_waiting_time_r \
+                        # + global_ego_accumulated_waiting_time_r \
+                        # + global_ego_position_x_r \
                         # + global_all_speed_r \
                         # + global_all_mean_speed_r \
                         # + global_all_waiting_time_r \
+                        # + global_all_accumulated_waiting_time_r \
+                        # + global_all_position_x_r \
+                        + range_vehs_speed_r \
+                        # + range_vehs_waiting_time_r \
+                        # + range_vehs_accumulated_waiting_time_r \
                         + time_penalty
                    for key in inidividual_rew_ego}
 
@@ -621,7 +842,7 @@ class VehEnvWrapper(gym.Wrapper):
             #                                                               self.bottle_neck_positions)
             shared_features, shared_features_flatten = compute_centralized_vehicle_features_hierarchical_version(
                 lane_statistics,
-                feature_vectors, feature_vectors_flatten)
+                feature_vectors, feature_vectors_flatten, self.ego_ids)
             self.__init_actions(raw_state=init_state)
 
         return feature_vectors_flatten, shared_features_flatten, {'step_time': self.warmup_steps + 1}
@@ -702,7 +923,8 @@ class VehEnvWrapper(gym.Wrapper):
             rewards = {key: 20.0 for key in self.ego_ids}
             for out_of_road_ego_id in self.out_of_road:
                 self.agent_mask[out_of_road_ego_id] = False
-                feature_vectors_flatten[out_of_road_ego_id] = np.zeros(435)  # TODO: 离开路网的车辆状态应该归零还是保持最后一步的状态？
+                # feature_vectors_flatten[out_of_road_ego_id] = np.zeros(435)  # TODO: 离开路网的车辆状态应该归零还是保持最后一步的状态？
+                feature_vectors_flatten[out_of_road_ego_id] = np.zeros(105) # 435 is the ITSC version
 
         # 处理以下reward
         if len(self.out_of_road) > 0 and len(feature_vectors) > 0:
@@ -711,7 +933,8 @@ class VehEnvWrapper(gym.Wrapper):
                 if out_of_road_ego_id not in infos['out_of_road']:
                     infos['out_of_road'].append(out_of_road_ego_id)
                 self.agent_mask[out_of_road_ego_id] = False
-                feature_vectors_flatten[out_of_road_ego_id] = np.zeros(435)
+                # feature_vectors_flatten[out_of_road_ego_id] = np.zeros(435)
+                feature_vectors_flatten[out_of_road_ego_id] = np.zeros(105) # 435 is the ITSC version
 
         # 获取shared_feature_vectors
         # shared_feature_vectors = compute_centralized_vehicle_features(lane_statistics,
@@ -719,7 +942,8 @@ class VehEnvWrapper(gym.Wrapper):
         #                                                               self.bottle_neck_positions)
         shared_features, shared_features_flatten = compute_centralized_vehicle_features_hierarchical_version(
             lane_statistics,
-            feature_vectors, feature_vectors_flatten)
+            feature_vectors, feature_vectors_flatten,
+            self.ego_ids)
         # 处理以下 infos
         if len(self.warn_ego_ids) > 0:
             infos['warning'].append(self.warn_ego_ids)

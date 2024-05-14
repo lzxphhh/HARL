@@ -79,8 +79,14 @@ example_dict = {
     'all_lane_stats': torch.zeros(18, 6),
     'bottle_neck_position': torch.zeros(2),
     'self_stats': torch.zeros(1, 13)
+} # ITSC version
+example_extend_dict = {
+    'bottle_neck_position': torch.zeros(2),
+    'self_stats': torch.zeros(1, 13),
+    'surround_hdv_stats': torch.zeros(12, 3),
+    'surround_cav_stats': torch.zeros(12, 3),
+    'lane_stats': torch.zeros(3, 6),
 }
-
 
 class Hierarchical_state_rep(nn.Module):
     def __init__(self, obs_dim, action_dim, n_embd, action_type='Discrete', args=None):
@@ -93,7 +99,8 @@ class Hierarchical_state_rep(nn.Module):
         self.action_type = action_type
 
         # Assuming the number of heads is 1 for simplicity
-        nfeat = 13  # Number of input features
+        # nfeat = 13  # Number of input features-ITSC version
+        nfeat = 3  # Number of input features
         nhid = 16  # Number of hidden units per attention head
         nclass = 64  # Number of output features
         nheads = 3  # Number of attention heads
@@ -101,7 +108,8 @@ class Hierarchical_state_rep(nn.Module):
         self.gat_HDV = GAT(nfeat=nfeat, nhid=nhid, nclass=nclass, dropout=0.6, alpha=0.2, nheads=nheads)
         self.gat_CAV = GAT(nfeat=nfeat, nhid=nhid, nclass=nclass, dropout=0.6, alpha=0.2, nheads=nheads)
 
-        self.mlp_all_lane = MLPBase(args, [108])
+        # self.mlp_all_lane = MLPBase(args, [108]) # ITSC version
+        self.mlp_lane = MLPBase(args, [18])
         self.mlp_bottle_neck = MLPBase(args, [2])
         self.mlp_combined = MLPBase(args, [256])
 
@@ -109,12 +117,47 @@ class Hierarchical_state_rep(nn.Module):
         # obs: (n_rollout_thread, obs_dim)
 
         # Loop through the observations and reconstruct the dictionary
-        reconstructed = self.reconstruct_obs_batch(obs, example_dict)
+        # reconstructed = self.reconstruct_obs_batch(obs, example_dict)
+        reconstructed = self.reconstruct_obs_batch(obs, example_extend_dict)
 
-        return reconstructed['hdv_stats'], reconstructed['cav_stats'], reconstructed['all_lane_stats'], \
-            reconstructed['bottle_neck_position'], reconstructed['self_stats']
+        # return reconstructed['hdv_stats'], reconstructed['cav_stats'], reconstructed['all_lane_stats'], \
+        #     reconstructed['bottle_neck_position'], reconstructed['self_stats']
+        return reconstructed['bottle_neck_position'], reconstructed['self_stats'], \
+            reconstructed['surround_hdv_stats'], reconstructed['surround_cav_stats'], \
+            reconstructed['lane_stats']
 
     def forward(self, obs, batch_size=20):
+        # obs: (n_rollout_thread, obs_dim)
+        bottle_neck, self_stats, surround_hdv, surround_cav, lanes = self.reconstruct(obs)
+        # The adjacency matrix needs to be a binary tensor indicating the edges
+        # Here, it is assumed that each self_state is connected to all hdv_stats.
+        self.adj = torch.ones(batch_size, 13, 13)
+        self.adj[:, 1:, 1:] = 0  # No connections between hdv_stats themselves
+
+        ############################## self_state & surrounding HDVs ##############################
+        # Concatenate the focal node to the rest of the nodes
+        # ego_stats = torch.zeros(batch_size, 1, 3, device='cuda')
+        ego_stats = self_stats[:, :, :3]
+        combined_states = torch.cat((ego_stats, surround_hdv), dim=1)
+
+        HDV_relation = self.gat_HDV(combined_states, self.adj.to(combined_states.device))
+
+        ############################## self_state & surrounding CAVs ##############################
+        combined_states = torch.cat((ego_stats, surround_cav), dim=1)
+        CAV_relation = self.gat_CAV(combined_states, self.adj.to(combined_states.device))
+
+        ############################## ego&left&right_lanes ##############################
+        lanes_embedding = self.mlp_lane(lanes.view(lanes.size(0), -1))
+
+        ############################## bottle_neck ##############################
+        bottle_neck_embedding = self.mlp_bottle_neck(bottle_neck)
+
+        # Concatenate all the embeddings
+        combined_embedding = torch.cat((HDV_relation, CAV_relation, lanes_embedding, bottle_neck_embedding), dim=1)
+        combined_embedding = self.mlp_combined(combined_embedding)
+
+        return combined_embedding
+    def forward_ITSCversion(self, obs, batch_size=20):
         # obs: (n_rollout_thread, obs_dim)
         hdv, cav, all_lane, bottle_neck, self_stats = self.reconstruct(obs)
         # The adjacency matrix needs to be a binary tensor indicating the edges
