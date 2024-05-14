@@ -433,7 +433,198 @@ def compute_ego_vehicle_features(
 
     return feature_vectors
 
+def compute_base_ego_vehicle_features(
+        hdv_statistics: Dict[str, List[Union[float, str, Tuple[int]]]],
+        ego_statistics: Dict[str, List[Union[float, str, Tuple[int]]]],
+        lane_statistics: Dict[str, List[float]],
+        unique_edges: List[str],
+        edge_lane_num: Dict[str, int],
+        bottle_neck_positions: Tuple[float],
+        ego_ids: List[str]
+) -> Dict[str, List[float]]:
+    """计算每一个 ego vehicle 的特征
 
+    Args:
+        ego_statistics (Dict[str, List[Union[float, str, Tuple[int]]]]): ego vehicle 的信息
+        lane_statistics (Dict[str, List[float]]): 路网的信息
+        unique_edges (List[str]): 所有考虑的 edge
+        edge_lane_num (Dict[str, int]): 每一个 edge 对应的车道
+        bottle_neck_positions (Tuple[float]): bottleneck 的坐标
+    output:
+        surround_vehs_stats: 12 * 3-relative x,y,v
+        ego_lane_stats: 6--vehicle count, lane density, lane length, speed-mean, waiting time-mean, lane CAV penetration
+        left_lane_stats: 6--vehicle count, lane density, lane length, speed-mean, waiting time-mean, lane CAV penetration
+        right_lane_stats: 6--vehicle count, lane density, lane length, speed-mean, waiting time-mean, lane CAV penetration
+        bottleneck_position & distance: 1 * 2
+        self_stats: 1 * 13
+    """
+    # ############################## 所有HDV的信息 ############################## 13
+    hdv_stats = {}
+    for hdv_id, hdv_info in hdv_statistics.items():
+        speed, position, heading, road_id, lane_index = hdv_info
+        # 速度归一化  - 1
+        normalized_speed = speed / 15.0
+        # 位置归一化  - 2
+        position_x, position_y = position
+        normalized_position_x = position_x / 700
+        normalized_position_y = position_y
+        # 转向归一化 - 1
+        normalized_heading = heading / 360
+        # One-hot encode road_id - 5
+        road_id_one_hot = one_hot_encode(road_id, unique_edges)
+        # One-hot encode lane_index - 4
+        lane_index_one_hot = one_hot_encode(lane_index, list(range(edge_lane_num.get(road_id, 0))))
+        # 如果车道数不足4个, 补0 对齐到最多数量的lane num
+        if len(lane_index_one_hot) < 4:
+            lane_index_one_hot += [0] * (4 - len(lane_index_one_hot))
+        hdv_stats[hdv_id] = [normalized_speed, normalized_position_x, normalized_position_y,
+                             normalized_heading] + road_id_one_hot + lane_index_one_hot
+    # convert to 2D array (12 * 13)  - 12 is max number of HDVs
+    hdv_stats = np.array(list(hdv_stats.values()))
+    if 0 < hdv_stats.shape[0] <= 12:
+        # add 0 to make sure the shape is (12, 13)
+        hdv_stats = np.vstack([hdv_stats, np.zeros((12 - hdv_stats.shape[0], 13))])
+    elif hdv_stats.shape[0] == 0:
+        hdv_stats = np.zeros((12, 13))
+    # ############################## 所有CAV的信息 ############################## 13
+    cav_stats = {}
+    ego_stats = {}
+    surround_vehs_stats = {key:[] for key in ego_ids}
+    for ego_id, ego_info in ego_statistics.items():
+        # ############################## 自己车的信息 ############################## 13
+        position, speed, heading, road_id, lane_index, surroundings = ego_info
+        # 速度归一化  - 1
+        normalized_speed = speed / 15.0
+        # 位置归一化  - 2
+        position_x, position_y = position
+        normalized_position_x = position_x / 700
+        normalized_position_y = position_y
+        # 转向归一化 - 1
+        normalized_heading = heading / 360
+        # One-hot encode road_id - 5
+        road_id_one_hot = one_hot_encode(road_id, unique_edges)
+        # One-hot encode lane_index - 4
+        lane_index_one_hot = one_hot_encode(lane_index, list(range(edge_lane_num.get(road_id, 0))))
+        # 如果车道数不足4个, 补0 对齐到最多数量的lane num
+        if len(lane_index_one_hot) < 4:
+            lane_index_one_hot += [0] * (4 - len(lane_index_one_hot))
+        # ############################## 周车信息 ############################## 18
+        # 提取surrounding的信息 -18
+        surround = []
+
+        for index, (_, statistics) in enumerate(surroundings.items()):
+            relat_x, relat_y, relat_v = statistics[1:4]
+            surround.append([relat_x, relat_y, relat_v])  # relat_x, relat_y, relat_v
+            surround_vehs_stats[ego_id].append([relat_x/700, relat_y, relat_v/15])
+        flat_surround = [item for sublist in surround for item in sublist]
+        # 如果周围车辆的信息不足6*3个, 补0 对齐到最多数量的周车信息
+        if len(flat_surround) < 36:
+            flat_surround += [0] * (36 - len(flat_surround))
+
+        # cav_stats[ego_id] = [normalized_speed, normalized_position_x, normalized_position_y,
+        #                      normalized_heading] + road_id_one_hot + lane_index_one_hot
+        # ego_stats[ego_id] = [normalized_speed, normalized_position_x, normalized_position_y,
+        #                      normalized_heading] + road_id_one_hot + lane_index_one_hot
+        cav_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed,
+                             normalized_heading] + road_id_one_hot + lane_index_one_hot
+        ego_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed,
+                             normalized_heading] + road_id_one_hot + lane_index_one_hot
+    # convert to 2D array (5 * 5)
+    cav_stats = np.array(list(cav_stats.values()))
+    if 0 < cav_stats.shape[0] <= 12:
+        # add 0 to make sure the shape is (12, 13)
+        cav_stats = np.vstack([cav_stats, np.zeros((12 - cav_stats.shape[0], 13))])
+    elif cav_stats.shape[0] == 0:
+        cav_stats = np.zeros((12, 13))
+
+    if len(ego_stats) != len(ego_ids):
+        for ego_id in ego_ids:
+            if ego_id not in ego_stats:
+                ego_stats[ego_id] = [0.0] * 13
+
+    # ############################## lane_statistics 的信息 ############################## 18
+    # Initialize a list to hold all lane statistics
+    all_lane_stats = {}
+
+    # Iterate over all possible lanes to get their statistics
+    for lane_id, lane_info in lane_statistics.items():
+        # - vehicle_count: 当前车道的车辆数 1
+        # - lane_density: 当前车道的车辆密度 1
+        # - lane_length: 这个车道的长度 1
+        # - speeds: 在这个车道上车的速度 1 (mean)
+        # - waiting_times: 一旦车辆开始行驶，等待时间清零 1  (mean)
+        # - accumulated_waiting_times: 车的累积等待时间 1 (mean)--delete
+        # - lane_CAV_penetration: 这个车道上的CAV占比 1
+
+        # all_lane_stats[lane_id] = lane_info[:4] + lane_info[6:7] + lane_info[9:10]
+        lane_info[0] = lane_info[0] / 10
+        lane_info[2] = lane_info[2] / 700
+        lane_info[3] = lane_info[3] / 15
+        all_lane_stats[lane_id] = lane_info[:4] + lane_info[6:7] + lane_info[13:14]
+
+    ego_lane_stats = {}
+    left_lane_stats = {}
+    right_lane_stats = {}
+    for ego_id in ego_statistics.keys():
+        ego_lane = f'{ego_statistics[ego_id][3]}_{ego_statistics[ego_id][4]}'
+        ego_lane_stats[ego_id] = all_lane_stats[ego_lane]
+        ego_lane_index = ego_statistics[ego_id][4]
+        if ego_lane_index > 0:
+            right_lane = f'{ego_statistics[ego_id][3]}_{ego_lane_index - 1}'
+            right_lane_stats[ego_id] = all_lane_stats[right_lane]
+        else:
+            right_lane_stats[ego_id] = np.ones(6)
+        if ego_lane_index < edge_lane_num[ego_statistics[ego_id][3]]-1:
+            left_lane = f'{ego_statistics[ego_id][3]}_{ego_lane_index + 1}'
+            left_lane_stats[ego_id] = all_lane_stats[left_lane]
+        else:
+            left_lane_stats[ego_id]= np.ones(6)
+
+    # convert to 2D array (18 * 6)
+    all_lane_stats = np.array(list(all_lane_stats.values()))
+
+    # ############################## bottle_neck 的信息 ##############################
+    # 车辆距离bottle_neck
+    bottle_neck_position_x = bottle_neck_positions[0] / 700
+    bottle_neck_position_y = bottle_neck_positions[1]
+
+    feature_vector = {}
+    # feature_vector['hdv_stats'] = hdv_stats
+    # feature_vector['cav_stats'] = cav_stats
+    # feature_vector['all_lane_stats'] = all_lane_stats
+    feature_vector['bottle_neck_position'] = np.array([bottle_neck_position_x, bottle_neck_position_y])
+
+    feature_vectors = {}
+    flat_surround_vehs = {key: [] for key in ego_ids}
+    for ego_id in ego_statistics.keys():
+        feature_vectors[ego_id] = feature_vector.copy()
+        feature_vectors[ego_id]['self_stats'] = ego_stats[ego_id]
+        flat_surround_vehs[ego_id] = [item for sublist in surround_vehs_stats[ego_id] for item in sublist]
+        if len(flat_surround_vehs[ego_id]) < 36:
+            flat_surround_vehs[ego_id] += [0] * (36 - len(flat_surround_vehs[ego_id]))
+        feature_vectors[ego_id]['surround_vehs_stats'] = flat_surround_vehs[ego_id]
+        feature_vectors[ego_id]['ego_lane_stats'] = ego_lane_stats[ego_id]
+        feature_vectors[ego_id]['left_lane_stats'] = left_lane_stats[ego_id]
+        feature_vectors[ego_id]['right_lane_stats'] = right_lane_stats[ego_id]
+
+    # A function to flatten a dictionary structure into 1D array
+    def flatten_to_1d(data_dict):
+        flat_list = []
+        for key, item in data_dict.items():
+            if isinstance(item, list):
+                flat_list.extend(item)
+            elif isinstance(item, np.ndarray):
+                flat_list.extend(item.flatten())
+        size_obs = np.size(np.array(flat_list))
+        if size_obs != 69:
+            print("Error: size_obs != 69")
+        return np.array(flat_list)
+
+    # Flatten the dictionary structure
+    feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
+                               feature_vectors.items()}
+
+    return feature_vectors, feature_vectors_flatten
 def compute_hierarchical_ego_vehicle_features(
         hdv_statistics: Dict[str, List[Union[float, str, Tuple[int]]]],
         ego_statistics: Dict[str, List[Union[float, str, Tuple[int]]]],
@@ -852,8 +1043,9 @@ def compute_centralized_vehicle_features_hierarchical_version(lane_statistics, f
     if len(shared_features_flatten) != len(ego_ids):
         for ego_id in feature_vectors_flatten.keys():
             if ego_id not in shared_features_flatten:
-                # shared_features_flatten[ego_id] = np.zeros(435)
-                shared_features_flatten[ego_id] = np.zeros(105)  # 435 is the length of the ITSC version
+                # shared_features_flatten[ego_id] = np.zeros(435)  # 435 is the length of the ITSC version
+                # shared_features_flatten[ego_id] = np.zeros(105)  # 105 is the length of the hierarchical version
+                shared_features_flatten[ego_id] = np.zeros(69)   # 69 is the length of the base version
     if len(shared_features_flatten) != len(ego_ids):
         print("Error: len(shared_features_flatten) != len(ego_ids)")
     if len(feature_vectors_flatten) != len(ego_ids):
