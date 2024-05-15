@@ -1,6 +1,8 @@
 from harl.common.base_logger import BaseLogger
 import time
 import numpy as np
+import csv
+import os
 
 
 # TODO： 统计以下指标：
@@ -42,6 +44,9 @@ class BottleneckLogger(BaseLogger):
         self.done_episodes_rewards = np.zeros(self.n_rollout_threads)
         self.done_episode_lens = np.zeros(self.n_rollout_threads)
         self.done_episode_infos = [{} for _ in range(self.n_rollout_threads)]
+        save_csv_dir = self.run_dir + '/csv'
+        self.csv_path = save_csv_dir + '/episode_info.csv'
+        os.makedirs(save_csv_dir)
 
         pass
 
@@ -197,6 +202,9 @@ class BottleneckLogger(BaseLogger):
         self.writter.add_scalar(
             "average_step_rewards", critic_train_info["average_step_rewards"], self.total_num_steps
         )
+        with open(self.csv_path, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow([self.total_num_steps, average_collision_rate, average_episode_step, average_episode_return])
 
         if average_collision_rate <= save_collision and average_episode_step <= save_episode_step:
             return True, self.total_num_steps
