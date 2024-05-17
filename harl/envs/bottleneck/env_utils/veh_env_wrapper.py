@@ -117,6 +117,10 @@ class VehEnvWrapper(gym.Wrapper):
         #     header={"t_start": self.t_start},
         # )
         self.rewards_writer = list()
+        self.history_1 = {ego_id: np.zeros(51) for ego_id in self.ego_ids}
+        self.history_2 = {ego_id: np.zeros(51) for ego_id in self.ego_ids}
+        self.history_3 = {ego_id: np.zeros(51) for ego_id in self.ego_ids}
+        self.history_4 = {ego_id: np.zeros(51) for ego_id in self.ego_ids}
 
     # #####################
     # Obs and Action Space
@@ -132,8 +136,8 @@ class VehEnvWrapper(gym.Wrapper):
         obs_space = gym.spaces.Box(
             # low=-np.inf, high=np.inf, shape=(435,)  # FIXED #TODO: 是否需要修改一下他的区间 inf
             # low=-np.inf, high=np.inf, shape=(105,)
-            low=-np.inf, high=np.inf, shape=(69,)
-        )  # 435 is the length of the ITSC version, 105 is the length of the hierarchical version, 69 is the length of the base version
+            low=-np.inf, high=np.inf, shape=(51*5,)
+        )  # 435 is the length of the ITSC version, 105 is the length of the hierarchical version, 51 is the length of the base version
         return {_ego_id: obs_space for _ego_id in self.ego_ids}
 
     @property
@@ -141,8 +145,8 @@ class VehEnvWrapper(gym.Wrapper):
         share_obs_space = gym.spaces.Box(
             # low=-np.inf, high=np.inf, shape=(435,)
             # low=-np.inf, high=np.inf, shape=(105,)
-            low = -np.inf, high = np.inf, shape = (69,)
-        ) # 435 is the length of the ITSC version, 105 is the length of the hierarchical version, 69 is the length of the base version
+            low = -np.inf, high = np.inf, shape = (51*5,)
+        ) # 435 is the length of the ITSC version, 105 is the length of the hierarchical version, 51 is the length of the base version
         return {_ego_id: share_obs_space for _ego_id in self.ego_ids}
 
     # ##################
@@ -515,7 +519,8 @@ class VehEnvWrapper(gym.Wrapper):
         # )
 
         # 计算每个 ego vehicle 的 state 拼接为向量
-        feature_vectors, feature_vectors_flatten = compute_base_ego_vehicle_features(
+        feature_vectors_current, feature_vectors, feature_vectors_flatten = compute_base_ego_vehicle_features(
+            self,
             hdv_statistics=hdv_statistics,
             lane_statistics=lane_statistics,
             ego_statistics=ego_statistics,
@@ -713,8 +718,8 @@ class VehEnvWrapper(gym.Wrapper):
         #               global_ego_speed_r + global_ego_waiting_time_r for key in inidividual_rew_ego}
 
         rewards = {key: inidividual_rew_ego[key] \
-                        + range_reward_ego[key] \
-                        + global_ego_speed_r \
+                        # + range_reward_ego[key] \
+                        # + global_ego_speed_r \
                         # + global_ego_mean_speed_r \
                         # + global_ego_waiting_time_r \
                         # + global_ego_accumulated_waiting_time_r \
@@ -937,7 +942,7 @@ class VehEnvWrapper(gym.Wrapper):
                 self.agent_mask[out_of_road_ego_id] = False
                 # feature_vectors_flatten[out_of_road_ego_id] = np.zeros(435)  # 435 is the ITSC version
                 # feature_vectors_flatten[out_of_road_ego_id] = np.zeros(105) # 105 is the hierarchical version
-                feature_vectors_flatten[out_of_road_ego_id] = np.zeros(69) # 69 is the base version
+                feature_vectors_flatten[out_of_road_ego_id] = np.zeros(51*5) # 51 is the base version
 
         # 处理以下reward
         if len(self.out_of_road) > 0 and len(feature_vectors) > 0:
@@ -948,7 +953,7 @@ class VehEnvWrapper(gym.Wrapper):
                 self.agent_mask[out_of_road_ego_id] = False
                 # feature_vectors_flatten[out_of_road_ego_id] = np.zeros(435) # 435 is the ITSC version
                 feature_vectors_flatten[out_of_road_ego_id] = np.zeros(105) # 105 is the hierarchical version
-                feature_vectors_flatten[out_of_road_ego_id] = np.zeros(69) # 69 is the base version
+                feature_vectors_flatten[out_of_road_ego_id] = np.zeros(51*5) # 51 is the base version
 
         # 获取shared_feature_vectors
         # shared_feature_vectors = compute_centralized_vehicle_features(lane_statistics,

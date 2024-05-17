@@ -92,16 +92,16 @@ def generate_scenario(
         else:
             distribution = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
         for i_all in range(veh_num):
-            pos_change = -5 if i_all % 4 == 1 else 5
-            pos_change = 10 if i_all % 4 == 2 else pos_change
-            pos_change = 0 if i_all % 4 == 0 else pos_change
+            pos_change = -7+3*random.random() if i_all % 4 == 1 else 5+3*random.random()
+            pos_change = 10+3*random.random() if i_all % 4 == 2 else pos_change
+            pos_change = -2+3*random.random() if i_all % 4 == 0 else pos_change
             if distribution[i_all % 10] == 1:
                 scene_change.add(
                     vehID=f'CAV_{i_CAV}',
                     typeID='ego',
                     routeID=f'route_{int(random_route_CAVs[i_CAV])}',
                     depart="now",
-                    departPos=f'{float(250 - i_all / 4 * 20 + pos_change)}',
+                    departPos=f'{float(250 - i_all / 4 * 25 + pos_change)}',
                     departLane=f'{int(i_all % 4)}',
                     departSpeed='10',
                 )
@@ -112,7 +112,7 @@ def generate_scenario(
                     typeID=f'HDV_{int(random_HDVs[i_HDV])}',
                     routeID=f'route_{int(random_route_HDVs[i_HDV])}',
                     depart="now",
-                    departPos=f'{float(250 - i_all / 4 * 20 + pos_change)}',
+                    departPos=f'{float(250 - i_all / 4 * 25 + pos_change)}',
                     departLane=f'{int(i_all % 4)}',
                     departSpeed='10',
                 )
