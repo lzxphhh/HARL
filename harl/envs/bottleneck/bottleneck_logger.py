@@ -202,7 +202,7 @@ class BottleneckLogger(BaseLogger):
         self.writter.add_scalar(
             "average_step_rewards", critic_train_info["average_step_rewards"], self.total_num_steps
         )
-        with open(self.csv_path, 'w', newline='') as csvfile:
+        with open(self.csv_path, 'a', newline='') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow([self.total_num_steps, average_collision_rate, average_episode_step, average_episode_return])
 
