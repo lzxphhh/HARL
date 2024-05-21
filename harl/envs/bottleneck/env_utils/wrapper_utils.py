@@ -67,12 +67,13 @@ def analyze_traffic(state, lane_ids):
     # 先收录所有车的信息 - （HDV + CAV）
     for vehicle_id, vehicle in state.items():
         lane_id = vehicle['lane_id']  # 这个车所在车道的 ID. eg: 'E0_2'
+        lane_index = vehicle['lane_index']
         if lane_id[:3] in [':J3']:
-            lane_id = 'E4'
+            lane_id = f'E4_{int(lane_index)}'
         elif lane_id[:3] in [':J1']:
-            lane_id = 'E1'
+            lane_id = f'E1_{int(lane_index)}'
         elif lane_id[:3] in [':J2']:
-            lane_id = 'E2'
+            lane_id = f'E2_{int(lane_index)}'
 
         road_id = vehicle['road_id']  # 这个车行驶道路的 ID. eg: 'E0'
         if road_id[:3] in [':J3']:
@@ -107,7 +108,7 @@ def analyze_traffic(state, lane_ids):
             surroundings = vehicle['surround']
             surroundings_expand = vehicle['surround_expand']
 
-            ego_statistics[vehicle_id] = [ position, speed,
+            ego_statistics[vehicle_id] = [position, speed,
                                           # speed, position,
                                           heading, road_id, lane_index,
                                           surroundings
