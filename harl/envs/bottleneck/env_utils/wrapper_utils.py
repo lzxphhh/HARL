@@ -594,7 +594,9 @@ def compute_base_ego_vehicle_features(
     # feature_vector['hdv_stats'] = hdv_stats
     # feature_vector['cav_stats'] = cav_stats
     # feature_vector['all_lane_stats'] = all_lane_stats
-    feature_vector['bottle_neck_position'] = np.array([bottle_neck_position_x, bottle_neck_position_y])
+    # feature_vector['bottle_neck_position'] = np.array([bottle_neck_position_x, bottle_neck_position_y])
+    feature_vector['road_structure'] = np.array([0, 0, bottle_neck_position_x, bottle_neck_position_y, 4,
+                                                 bottle_neck_position_x, bottle_neck_position_y, 1, 0, 2])
 
     feature_vectors_current = {}
     flat_surround_vehs = {key: [] for key in ego_ids}
@@ -640,6 +642,7 @@ def compute_base_ego_vehicle_features(
 
     return feature_vectors_current, feature_vectors, feature_vectors_flatten
 def compute_hierarchical_ego_vehicle_features(
+        self,
         hdv_statistics: Dict[str, List[Union[float, str, Tuple[int]]]],
         ego_statistics: Dict[str, List[Union[float, str, Tuple[int]]]],
         lane_statistics: Dict[str, List[float]],
@@ -803,25 +806,27 @@ def compute_hierarchical_ego_vehicle_features(
     # feature_vector['hdv_stats'] = hdv_stats
     # feature_vector['cav_stats'] = cav_stats
     # feature_vector['all_lane_stats'] = all_lane_stats
-    feature_vector['bottle_neck_position'] = np.array([bottle_neck_position_x, bottle_neck_position_y])
+    # feature_vector['bottle_neck_position'] = np.array([bottle_neck_position_x, bottle_neck_position_y])
+    feature_vector['road_structure'] = np.array([0, 0, bottle_neck_position_x, bottle_neck_position_y, 4,
+                                                 bottle_neck_position_x, bottle_neck_position_y, 1, 0, 2])
 
-    feature_vectors = {}
+    feature_vectors_current = {}
     flat_surround_hdv = {key: [] for key in ego_ids}
     flat_surround_cav = {key: [] for key in ego_ids}
     for ego_id in ego_statistics.keys():
-        feature_vectors[ego_id] = feature_vector.copy()
-        feature_vectors[ego_id]['self_stats'] = ego_stats[ego_id]
+        feature_vectors_current[ego_id] = feature_vector.copy()
+        feature_vectors_current[ego_id]['self_stats'] = ego_stats[ego_id]
         flat_surround_hdv[ego_id] = [item for sublist in surround_hdv_stats[ego_id] for item in sublist]
-        if len(flat_surround_hdv[ego_id]) < 36:
-            flat_surround_hdv[ego_id] += [0] * (36 - len(flat_surround_hdv[ego_id]))
+        if len(flat_surround_hdv[ego_id]) < 18:
+            flat_surround_hdv[ego_id] += [0] * (18 - len(flat_surround_hdv[ego_id]))
         flat_surround_cav[ego_id] = [item for sublist in surround_cav_stats[ego_id] for item in sublist]
-        if len(flat_surround_cav[ego_id]) < 36:
-            flat_surround_cav[ego_id] += [0] * (36 - len(flat_surround_cav[ego_id]))
-        feature_vectors[ego_id]['surround_hdv_stats'] = flat_surround_hdv[ego_id]
-        feature_vectors[ego_id]['surround_cav_stats'] = flat_surround_cav[ego_id]
-        feature_vectors[ego_id]['ego_lane_stats'] = ego_lane_stats[ego_id]
-        feature_vectors[ego_id]['left_lane_stats'] = left_lane_stats[ego_id]
-        feature_vectors[ego_id]['right_lane_stats'] = right_lane_stats[ego_id]
+        if len(flat_surround_cav[ego_id]) < 18:
+            flat_surround_cav[ego_id] += [0] * (18 - len(flat_surround_cav[ego_id]))
+        feature_vectors_current[ego_id]['surround_hdv_stats'] = flat_surround_hdv[ego_id]
+        feature_vectors_current[ego_id]['surround_cav_stats'] = flat_surround_cav[ego_id]
+        feature_vectors_current[ego_id]['ego_lane_stats'] = ego_lane_stats[ego_id]
+        feature_vectors_current[ego_id]['left_lane_stats'] = left_lane_stats[ego_id]
+        feature_vectors_current[ego_id]['right_lane_stats'] = right_lane_stats[ego_id]
 
     # A function to flatten a dictionary structure into 1D array
     def flatten_to_1d(data_dict):
@@ -832,15 +837,27 @@ def compute_hierarchical_ego_vehicle_features(
             elif isinstance(item, np.ndarray):
                 flat_list.extend(item.flatten())
         size_obs = np.size(np.array(flat_list))
-        if size_obs != 105:
-            print("Error: size_obs != 105")
         return np.array(flat_list)
 
     # Flatten the dictionary structure
-    feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
-                               feature_vectors.items()}
+    feature_vectors_current_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
+                               feature_vectors_current.items()}
+    feature_vectors = {key: {} for key in ego_statistics.keys()}
+    for ego_id, feature_vector_current in feature_vectors_current_flatten.items():
+        feature_vectors[ego_id]['1history_4'] = self.history_4[ego_id]
+        feature_vectors[ego_id]['2history_3'] = self.history_3[ego_id]
+        feature_vectors[ego_id]['3history_2'] = self.history_2[ego_id]
+        feature_vectors[ego_id]['4history_1'] = self.history_1[ego_id]
+        feature_vectors[ego_id]['5current_stats'] = feature_vector_current
 
-    return feature_vectors, feature_vectors_flatten
+        self.history_4[ego_id] = self.history_3[ego_id]
+        self.history_3[ego_id] = self.history_2[ego_id]
+        self.history_2[ego_id] = self.history_1[ego_id]
+        self.history_1[ego_id] = feature_vector_current
+    feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
+                                       feature_vectors.items()}
+
+    return feature_vectors_current, feature_vectors, feature_vectors_flatten
 def compute_hierarchical_ego_vehicle_features_ITSCversion(
         hdv_statistics: Dict[str, List[Union[float, str, Tuple[int]]]],
         ego_statistics: Dict[str, List[Union[float, str, Tuple[int]]]],
@@ -1059,7 +1076,7 @@ def compute_centralized_vehicle_features_hierarchical_version(lane_statistics, f
             if ego_id not in shared_features_flatten:
                 # shared_features_flatten[ego_id] = np.zeros(435)  # 435 is the length of the ITSC version
                 # shared_features_flatten[ego_id] = np.zeros(105)  # 105 is the length of the hierarchical version
-                shared_features_flatten[ego_id] = np.zeros(51*5)   # 51 is the length of the base version
+                shared_features_flatten[ego_id] = np.zeros(77*5)   # 59 is the length of the base version, 77 is the length of the hierarchical version
     if len(shared_features_flatten) != len(ego_ids):
         print("Error: len(shared_features_flatten) != len(ego_ids)")
     if len(feature_vectors_flatten) != len(ego_ids):

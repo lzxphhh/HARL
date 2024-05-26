@@ -136,12 +136,16 @@ class BottleneckLogger(BaseLogger):
 
         # 记录每个episode的平均avergae reward 和 average step和collision rate
         collision_count = 0
+        done_episode_lens = []
         for each_env_info in self.done_episode_infos:
             if each_env_info['done_reason'] == 'collision':
                 collision_count += 1
+            else:
+                done_episode_lens.append(each_env_info['step_time']-1)
         average_collision_rate = collision_count / len(self.done_episode_infos)
         average_episode_return = np.mean(self.done_episodes_rewards)
-        average_episode_step = np.mean(self.done_episode_lens)
+        # average_episode_step = np.mean(self.done_episode_lens)
+        average_episode_step = np.mean(done_episode_lens) if done_episode_lens else 0
 
         # self.writter.add_scalars(
         #     "average_collision_rate",

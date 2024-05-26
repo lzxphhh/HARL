@@ -34,9 +34,9 @@ class StochasticPolicy(nn.Module):
 
         obs_shape = get_shape_from_obs_space(obs_space)
         base = CNNBase if len(obs_shape) == 3 else MLPBase
-        self.base = base(args, obs_shape)
+        # self.base = base(args, obs_shape)
         # self.attention = Encoder(obs_shape[0], action_space.n, 1, self.hidden_sizes[-1], 4, 'Discrete')
-        # self.hierarchical = Hierarchical_state_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
+        self.hierarchical = Hierarchical_state_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
 
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             self.rnn = RNNLayer(
@@ -79,9 +79,9 @@ class StochasticPolicy(nn.Module):
         if available_actions is not None:
             available_actions = check(available_actions).to(**self.tpdv)
 
-        actor_features = self.base(obs)
+        # actor_features = self.base(obs)
         # actor_features = self.attention(obs)
-        # actor_features = self.hierarchical(obs, batch_size=obs.size(0))
+        actor_features = self.hierarchical(obs, batch_size=obs.size(0))
 
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
@@ -119,9 +119,9 @@ class StochasticPolicy(nn.Module):
         if active_masks is not None:
             active_masks = check(active_masks).to(**self.tpdv)
 
-        actor_features = self.base(obs)
+        # actor_features = self.base(obs)
         # actor_features = self.attention(obs)
-        # actor_features = self.hierarchical(obs, batch_size=obs.size(0))
+        actor_features = self.hierarchical(obs, batch_size=obs.size(0))
 
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
