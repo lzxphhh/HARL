@@ -8,7 +8,8 @@ from harl.models.base.hierarchical_state_rep import Hierarchical_state_rep
 from harl.models.base.rnn import RNNLayer
 from harl.models.base.act import ACTLayer
 from harl.utils.envs_tools import get_shape_from_obs_space
-
+import yaml
+import copy
 
 class StochasticPolicy(nn.Module):
     """Stochastic policy model. Outputs actions given observations."""
@@ -22,6 +23,13 @@ class StochasticPolicy(nn.Module):
             device: (torch.device) specifies the device to run on (cpu/gpu).
         """
         super(StochasticPolicy, self).__init__()
+        # Load the environment arguments
+        env_args = yaml.load(
+            open('/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/harl/configs/envs_cfgs/bottleneck.yaml',
+                 'r'),
+            Loader=yaml.FullLoader)
+        self.env_args = copy.deepcopy(env_args)
+        self.strategy = env_args['strategy']
         self.hidden_sizes = args["hidden_sizes"]
         self.args = args
         self.gain = args["gain"]
@@ -34,8 +42,8 @@ class StochasticPolicy(nn.Module):
 
         obs_shape = get_shape_from_obs_space(obs_space)
         base = CNNBase if len(obs_shape) == 3 else MLPBase
-        # self.base = base(args, obs_shape)
-        # self.attention = Encoder(obs_shape[0], action_space.n, 1, self.hidden_sizes[-1], 4, 'Discrete')
+        self.base = base(args, obs_shape)
+        self.attention = Encoder(obs_shape[0], action_space.n, 1, self.hidden_sizes[-1], 4, 'Discrete')
         self.hierarchical = Hierarchical_state_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
 
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
@@ -79,9 +87,12 @@ class StochasticPolicy(nn.Module):
         if available_actions is not None:
             available_actions = check(available_actions).to(**self.tpdv)
 
-        # actor_features = self.base(obs)
-        # actor_features = self.attention(obs)
-        actor_features = self.hierarchical(obs, batch_size=obs.size(0))
+        if self.strategy == 'base':
+            actor_features = self.base(obs)
+        elif self.strategy == 'attention':
+            actor_features = self.attention(obs)
+        elif self.strategy == 'hierarchical':
+            actor_features = self.hierarchical(obs, batch_size=obs.size(0))
 
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
@@ -121,7 +132,13 @@ class StochasticPolicy(nn.Module):
 
         # actor_features = self.base(obs)
         # actor_features = self.attention(obs)
-        actor_features = self.hierarchical(obs, batch_size=obs.size(0))
+        # actor_features = self.hierarchical(obs, batch_size=obs.size(0))
+        if self.strategy == 'base':
+            actor_features = self.base(obs)
+        elif self.strategy == 'attention':
+            actor_features = self.attention(obs)
+        elif self.strategy == 'hierarchical':
+            actor_features = self.hierarchical(obs, batch_size=obs.size(0))
 
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)

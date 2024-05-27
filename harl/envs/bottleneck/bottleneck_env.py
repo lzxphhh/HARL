@@ -21,6 +21,7 @@ def make_bottleneck_envs(args):
     # for veh wrapper
     scene_name = args['scene_name']
     num_CAVs = args['num_CAVs']
+    num_HDVs = args['num_HDVs']
     penetration_CAV = args['penetration_CAV']
     warmup_steps = args['warmup_steps']
     edge_ids = args['edge_ids']
@@ -33,7 +34,7 @@ def make_bottleneck_envs(args):
     aggressive = args['aggressive']
     cautious = args['cautious']
     normal = args['normal']
-
+    strategy = args['strategy']
 
     veh_env = VehEnvironment(
         sumo_cfg=sumo_cfg,
@@ -46,6 +47,7 @@ def make_bottleneck_envs(args):
         env=veh_env,
         name_scenario=scene_name,
         num_CAVs=num_CAVs,
+        num_HDVs=num_HDVs,
         CAV_penetration=penetration_CAV,
         warmup_steps=warmup_steps,
         edge_ids=edge_ids,
@@ -59,7 +61,7 @@ def make_bottleneck_envs(args):
         aggressive=aggressive,
         cautious=cautious,
         normal=normal,
-
+        strategy=strategy,
     )
     return veh_env
 

@@ -53,6 +53,7 @@ class VehEnvWrapper(gym.Wrapper):
                  name_scenario: str,  # 场景的名称
                  CAV_penetration: float,  # HDV 的数量
                  num_CAVs: int,  # CAV 的数量
+                 num_HDVs: int,  # HDV 的数量
                  edge_ids: List[str],  # 路网中所有路段的 id
                  edge_lane_num: Dict[str, int],  # 每个 edge 的车道数
                  calc_features_lane_ids: List[str],  # 需要统计特征的 lane id
@@ -65,11 +66,13 @@ class VehEnvWrapper(gym.Wrapper):
                  aggressive: float,  # aggressive 的概率
                  cautious: float,  # cautious 的概率
                  normal: float,  # normal 的概率
+                 strategy: str, # MARL 的策略- feature extraction
                  ) -> None:
         super().__init__(env)
         self.name_scenario = name_scenario
         self.CAV_penetration = CAV_penetration
         self.num_CAVs = num_CAVs
+        self.num_HDVs = num_HDVs
 
         # random generate self.num_CAVs CAVs from range (4, 6)
         # self.num_CAVs = random.choice([4, 5, 6])
@@ -87,6 +90,7 @@ class VehEnvWrapper(gym.Wrapper):
         self.aggressive = aggressive
         self.cautious = cautious
         self.normal = normal
+        self.strategy = strategy
 
         self.ego_ids = [f'CAV_{i}' for i in range(self.num_CAVs)]
 
@@ -118,10 +122,20 @@ class VehEnvWrapper(gym.Wrapper):
         #     header={"t_start": self.t_start},
         # )
         self.rewards_writer = list()
-        self.history_1 = {ego_id: np.zeros(77) for ego_id in self.ego_ids} # 77 for hierarchical version; 59 for baseline version
-        self.history_2 = {ego_id: np.zeros(77) for ego_id in self.ego_ids}
-        self.history_3 = {ego_id: np.zeros(77) for ego_id in self.ego_ids}
-        self.history_4 = {ego_id: np.zeros(77) for ego_id in self.ego_ids}
+        # all hdv + all cav + all lanes + bottleneck + road structure + self stats + surround hdv + surround cav + surround lanes
+        shared_hier_obs_size = num_HDVs*13 + num_CAVs*13 + 18*6 + 2 + 10 + 13 + 4*6 + 4*6 + 3*6
+        # road structure + self stats + surround vehs + surround lanes
+        shared_base_obs_size = 10 + 13 + 3*6 + 3*6
+        if self.strategy == 'hierarchical':
+            self.shared_obs_size = shared_hier_obs_size
+        elif self.strategy == 'base':
+            self.shared_obs_size = shared_base_obs_size
+        elif self.strategy == 'attention':
+            self.shared_obs_size = shared_hier_obs_size
+        self.history_1 = {ego_id: np.zeros(self.shared_obs_size) for ego_id in self.ego_ids}
+        self.history_2 = {ego_id: np.zeros(self.shared_obs_size) for ego_id in self.ego_ids}
+        self.history_3 = {ego_id: np.zeros(self.shared_obs_size) for ego_id in self.ego_ids}
+        self.history_4 = {ego_id: np.zeros(self.shared_obs_size) for ego_id in self.ego_ids}
 
     # #####################
     # Obs and Action Space
@@ -137,8 +151,8 @@ class VehEnvWrapper(gym.Wrapper):
         obs_space = gym.spaces.Box(
             # low=-np.inf, high=np.inf, shape=(435,)  # FIXED #TODO: 是否需要修改一下他的区间 inf
             # low=-np.inf, high=np.inf, shape=(105,)
-            low=-np.inf, high=np.inf, shape=(77*5,)
-        )  # 435 is the length of the ITSC version, 77*5 is the length of the hierarchical version, 59*5 is the length of the base version
+            low=-np.inf, high=np.inf, shape=(self.shared_obs_size*5,)
+        )
         return {_ego_id: obs_space for _ego_id in self.ego_ids}
 
     @property
@@ -146,8 +160,8 @@ class VehEnvWrapper(gym.Wrapper):
         share_obs_space = gym.spaces.Box(
             # low=-np.inf, high=np.inf, shape=(435,)
             # low=-np.inf, high=np.inf, shape=(105,)
-            low = -np.inf, high = np.inf, shape = (77*5,)
-        ) # 435 is the length of the ITSC version, 77*5 is the length of the hierarchical version, 59*5 is the length of the base version
+            low = -np.inf, high = np.inf, shape = (self.shared_obs_size*5,)
+        )
         return {_ego_id: share_obs_space for _ego_id in self.ego_ids}
 
     # ##################
@@ -520,26 +534,28 @@ class VehEnvWrapper(gym.Wrapper):
         # )
 
         # 计算每个 ego vehicle 的 state 拼接为向量
-        # feature_vectors_current, feature_vectors, feature_vectors_flatten = compute_base_ego_vehicle_features(
-        #     self,
-        #     hdv_statistics=hdv_statistics,
-        #     lane_statistics=lane_statistics,
-        #     ego_statistics=ego_statistics,
-        #     unique_edges=self.edge_ids,
-        #     edge_lane_num=self.edge_lane_num,
-        #     bottle_neck_positions=self.bottle_neck_positions,
-        #     ego_ids=self.ego_ids,
-        # )
-        feature_vectors_current, feature_vectors, feature_vectors_flatten = compute_hierarchical_ego_vehicle_features(
-            self,
-            hdv_statistics=hdv_statistics,
-            lane_statistics=lane_statistics,
-            ego_statistics=ego_statistics,
-            unique_edges=self.edge_ids,
-            edge_lane_num=self.edge_lane_num,
-            bottle_neck_positions=self.bottle_neck_positions,
-            ego_ids=self.ego_ids,
-        )
+        if self.strategy == 'base':
+            feature_vectors_current, feature_vectors, feature_vectors_flatten = compute_base_ego_vehicle_features(
+                self,
+                hdv_statistics=hdv_statistics,
+                lane_statistics=lane_statistics,
+                ego_statistics=ego_statistics,
+                unique_edges=self.edge_ids,
+                edge_lane_num=self.edge_lane_num,
+                bottle_neck_positions=self.bottle_neck_positions,
+                ego_ids=self.ego_ids,
+            )
+        elif self.strategy == 'hierarchical':
+            feature_vectors_current, feature_vectors, feature_vectors_flatten = compute_hierarchical_ego_vehicle_features(
+                self,
+                hdv_statistics=hdv_statistics,
+                lane_statistics=lane_statistics,
+                ego_statistics=ego_statistics,
+                unique_edges=self.edge_ids,
+                edge_lane_num=self.edge_lane_num,
+                bottle_neck_positions=self.bottle_neck_positions,
+                ego_ids=self.ego_ids,
+            )
 
         return feature_vectors, feature_vectors_flatten, lane_statistics, ego_statistics, reward_statistics
 
@@ -905,6 +921,7 @@ class VehEnvWrapper(gym.Wrapper):
             #                                                               feature_vectors,
             #                                                               self.bottle_neck_positions)
             shared_features, shared_features_flatten = compute_centralized_vehicle_features_hierarchical_version(
+                self.shared_obs_size,
                 lane_statistics,
                 feature_vectors, feature_vectors_flatten, self.ego_ids)
             self.__init_actions(raw_state=init_state)
@@ -989,7 +1006,7 @@ class VehEnvWrapper(gym.Wrapper):
                 self.agent_mask[out_of_road_ego_id] = False
                 # feature_vectors_flatten[out_of_road_ego_id] = np.zeros(435) # 435 is the ITSC version
                 # feature_vectors_flatten[out_of_road_ego_id] = np.zeros(105) # 105 is the hierarchical version
-                feature_vectors_flatten[out_of_road_ego_id] = np.zeros(77*5) # 59 is the base version, 77 is the hierarchical version
+                feature_vectors_flatten[out_of_road_ego_id] = np.zeros(self.shared_obs_size*5)
 
         # 处理以下reward
         if len(self.out_of_road) > 0 and len(feature_vectors) > 0:
@@ -1000,13 +1017,14 @@ class VehEnvWrapper(gym.Wrapper):
                 self.agent_mask[out_of_road_ego_id] = False
                 # feature_vectors_flatten[out_of_road_ego_id] = np.zeros(435) # 435 is the ITSC version
                 # feature_vectors_flatten[out_of_road_ego_id] = np.zeros(105) # 105 is the hierarchical version
-                feature_vectors_flatten[out_of_road_ego_id] = np.zeros(77*5) # 59 is the base version, 77 is the hierarchical version
+                feature_vectors_flatten[out_of_road_ego_id] = np.zeros(self.shared_obs_size*5)
 
         # 获取shared_feature_vectors
         # shared_feature_vectors = compute_centralized_vehicle_features(lane_statistics,
         #                                                               feature_vectors,
         #                                                               self.bottle_neck_positions)
         shared_features, shared_features_flatten = compute_centralized_vehicle_features_hierarchical_version(
+            self.shared_obs_size,
             lane_statistics,
             feature_vectors, feature_vectors_flatten,
             self.ego_ids)

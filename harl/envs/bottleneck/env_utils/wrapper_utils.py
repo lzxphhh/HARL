@@ -691,11 +691,11 @@ def compute_hierarchical_ego_vehicle_features(
                              normalized_heading] + road_id_one_hot + lane_index_one_hot
     # convert to 2D array (12 * 13)  - 12 is max number of HDVs
     hdv_stats = np.array(list(hdv_stats.values()))
-    if 0 < hdv_stats.shape[0] <= 12:
+    if 0 < hdv_stats.shape[0] <= self.num_HDVs:
         # add 0 to make sure the shape is (12, 13)
-        hdv_stats = np.vstack([hdv_stats, np.zeros((12 - hdv_stats.shape[0], 13))])
+        hdv_stats = np.vstack([hdv_stats, np.zeros((self.num_HDVs - hdv_stats.shape[0], 13))])
     elif hdv_stats.shape[0] == 0:
-        hdv_stats = np.zeros((12, 13))
+        hdv_stats = np.zeros((self.num_HDVs, 13))
     # ############################## 所有CAV的信息 ############################## 13
     cav_stats = {}
     ego_stats = {}
@@ -725,15 +725,15 @@ def compute_hierarchical_ego_vehicle_features(
 
         for index, (_, statistics) in enumerate(surroundings.items()):
             relat_x, relat_y, relat_v = statistics[1:4]
-            surround.append([relat_x, relat_y, relat_v])  # relat_x, relat_y, relat_v
+            surround.append([int(statistics[0][4:]), relat_x, relat_y, relat_v])  # relat_x, relat_y, relat_v
             if statistics[0][:3] == 'HDV':
-                surround_hdv_stats[ego_id].append([relat_x/700, relat_y, relat_v/15])
+                surround_hdv_stats[ego_id].append([int(statistics[0][4:]), relat_x/700, relat_y, relat_v/15])
             elif statistics[0][:3] == 'CAV':
-                surround_cav_stats[ego_id].append([relat_x/700, relat_y, relat_v/15])
+                surround_cav_stats[ego_id].append([int(statistics[0][4:]), relat_x/700, relat_y, relat_v/15])
         flat_surround = [item for sublist in surround for item in sublist]
         # 如果周围车辆的信息不足6*3个, 补0 对齐到最多数量的周车信息
-        if len(flat_surround) < 18:
-            flat_surround += [0] * (18 - len(flat_surround))
+        if len(flat_surround) < 4*6:
+            flat_surround += [0] * (4*6 - len(flat_surround))
 
         # cav_stats[ego_id] = [normalized_speed, normalized_position_x, normalized_position_y,
         #                      normalized_heading] + road_id_one_hot + lane_index_one_hot
@@ -745,11 +745,11 @@ def compute_hierarchical_ego_vehicle_features(
                              normalized_heading] + road_id_one_hot + lane_index_one_hot
     # convert to 2D array (5 * 5)
     cav_stats = np.array(list(cav_stats.values()))
-    if 0 < cav_stats.shape[0] <= 12:
+    if 0 < cav_stats.shape[0] <= self.num_CAVs:
         # add 0 to make sure the shape is (12, 13)
-        cav_stats = np.vstack([cav_stats, np.zeros((12 - cav_stats.shape[0], 13))])
+        cav_stats = np.vstack([cav_stats, np.zeros((self.num_CAVs - cav_stats.shape[0], 13))])
     elif cav_stats.shape[0] == 0:
-        cav_stats = np.zeros((12, 13))
+        cav_stats = np.zeros((self.num_CAVs, 13))
 
     if len(ego_stats) != len(ego_ids):
         for ego_id in ego_ids:
@@ -803,10 +803,10 @@ def compute_hierarchical_ego_vehicle_features(
     bottle_neck_position_y = bottle_neck_positions[1]
 
     feature_vector = {}
-    # feature_vector['hdv_stats'] = hdv_stats
-    # feature_vector['cav_stats'] = cav_stats
-    # feature_vector['all_lane_stats'] = all_lane_stats
-    # feature_vector['bottle_neck_position'] = np.array([bottle_neck_position_x, bottle_neck_position_y])
+    feature_vector['hdv_stats'] = hdv_stats
+    feature_vector['cav_stats'] = cav_stats
+    feature_vector['all_lane_stats'] = all_lane_stats
+    feature_vector['bottle_neck_position'] = np.array([bottle_neck_position_x, bottle_neck_position_y])
     feature_vector['road_structure'] = np.array([0, 0, bottle_neck_position_x, bottle_neck_position_y, 4,
                                                  bottle_neck_position_x, bottle_neck_position_y, 1, 0, 2])
 
@@ -817,11 +817,11 @@ def compute_hierarchical_ego_vehicle_features(
         feature_vectors_current[ego_id] = feature_vector.copy()
         feature_vectors_current[ego_id]['self_stats'] = ego_stats[ego_id]
         flat_surround_hdv[ego_id] = [item for sublist in surround_hdv_stats[ego_id] for item in sublist]
-        if len(flat_surround_hdv[ego_id]) < 18:
-            flat_surround_hdv[ego_id] += [0] * (18 - len(flat_surround_hdv[ego_id]))
+        if len(flat_surround_hdv[ego_id]) < 24:
+            flat_surround_hdv[ego_id] += [0] * (24 - len(flat_surround_hdv[ego_id]))
         flat_surround_cav[ego_id] = [item for sublist in surround_cav_stats[ego_id] for item in sublist]
-        if len(flat_surround_cav[ego_id]) < 18:
-            flat_surround_cav[ego_id] += [0] * (18 - len(flat_surround_cav[ego_id]))
+        if len(flat_surround_cav[ego_id]) < 24:
+            flat_surround_cav[ego_id] += [0] * (24 - len(flat_surround_cav[ego_id]))
         feature_vectors_current[ego_id]['surround_hdv_stats'] = flat_surround_hdv[ego_id]
         feature_vectors_current[ego_id]['surround_cav_stats'] = flat_surround_cav[ego_id]
         feature_vectors_current[ego_id]['ego_lane_stats'] = ego_lane_stats[ego_id]
@@ -1054,7 +1054,7 @@ def compute_centralized_vehicle_features(lane_statistics, feature_vectors, bottl
 
     return shared_features
 
-def compute_centralized_vehicle_features_hierarchical_version(lane_statistics, feature_vectors, feature_vectors_flatten, ego_ids):
+def compute_centralized_vehicle_features_hierarchical_version(shared_obs_size, lane_statistics, feature_vectors, feature_vectors_flatten, ego_ids):
     shared_features = {}
 
     for ego_id in feature_vectors.keys():
@@ -1076,7 +1076,7 @@ def compute_centralized_vehicle_features_hierarchical_version(lane_statistics, f
             if ego_id not in shared_features_flatten:
                 # shared_features_flatten[ego_id] = np.zeros(435)  # 435 is the length of the ITSC version
                 # shared_features_flatten[ego_id] = np.zeros(105)  # 105 is the length of the hierarchical version
-                shared_features_flatten[ego_id] = np.zeros(77*5)   # 59 is the length of the base version, 77 is the length of the hierarchical version
+                shared_features_flatten[ego_id] = np.zeros(shared_obs_size*5)
     if len(shared_features_flatten) != len(ego_ids):
         print("Error: len(shared_features_flatten) != len(ego_ids)")
     if len(feature_vectors_flatten) != len(ego_ids):

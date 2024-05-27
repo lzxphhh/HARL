@@ -144,8 +144,8 @@ class BottleneckLogger(BaseLogger):
                 done_episode_lens.append(each_env_info['step_time']-1)
         average_collision_rate = collision_count / len(self.done_episode_infos)
         average_episode_return = np.mean(self.done_episodes_rewards)
-        # average_episode_step = np.mean(self.done_episode_lens)
-        average_episode_step = np.mean(done_episode_lens) if done_episode_lens else 0
+        average_episode_step = np.mean(self.done_episode_lens)
+        # average_episode_step = np.mean(done_episode_lens) if done_episode_lens else 0
 
         # self.writter.add_scalars(
         #     "average_collision_rate",

@@ -1,5 +1,5 @@
 scenario: bottleneck
-task: baseline_rmappo_6_0.4
+task: IAHR_rmappo_6_0.4
 
 sumo_cfg: "env_utils/bottleneck_map_small/scenario.sumocfg"
 max_num_seconds: 100
@@ -9,7 +9,9 @@ use_gui: False
 # for veh wrapper
 scene_name: "Env_Bottleneck"
 num_CAVs: 6  # num_CAVs/penetration_CAV should be an integer multiple of 10, except for penetration_CAV=1
+num_HDVs: 9
 penetration_CAV: 0.4 # only 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1 are valid
+strategy: "hierarchical"  # "base" or "attention" or "hierarchical" or "other"
 warmup_steps: 0
 edge_ids: [ 'E0', 'E1', 'E2', 'E3', 'E4', ]
 edge_lane_num: { 'E0': 4,
