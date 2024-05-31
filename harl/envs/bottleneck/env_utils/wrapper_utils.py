@@ -599,6 +599,7 @@ def compute_base_ego_vehicle_features(
                                                  bottle_neck_position_x, bottle_neck_position_y, 1, 0, 2])
 
     feature_vectors_current = {}
+    shared_feature_vectors_current = {}
     flat_surround_vehs = {key: [] for key in ego_ids}
     for ego_id in ego_statistics.keys():
         feature_vectors_current[ego_id] = feature_vector.copy()
@@ -610,6 +611,11 @@ def compute_base_ego_vehicle_features(
         feature_vectors_current[ego_id]['ego_lane_stats'] = ego_lane_stats[ego_id]
         feature_vectors_current[ego_id]['left_lane_stats'] = left_lane_stats[ego_id]
         feature_vectors_current[ego_id]['right_lane_stats'] = right_lane_stats[ego_id]
+
+        shared_feature_vectors_current[ego_id] = feature_vector.copy()
+        shared_feature_vectors_current[ego_id]['self_stats'] = ego_stats[ego_id]
+        shared_feature_vectors_current[ego_id]['surround_vehs_stats'] = flat_surround_vehs[ego_id]
+        shared_feature_vectors_current[ego_id]['all_lane_stats'] = all_lane_stats
 
     # A function to flatten a dictionary structure into 1D array
     def flatten_to_1d(data_dict):
@@ -626,21 +632,31 @@ def compute_base_ego_vehicle_features(
     feature_vectors_current_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
                                feature_vectors_current.items()}
     feature_vectors = {key: {} for key in ego_statistics.keys()}
-    for ego_id, feature_vector_current in feature_vectors_current_flatten.items():
-        feature_vectors[ego_id]['1history_4'] = self.history_4[ego_id]
-        feature_vectors[ego_id]['2history_3'] = self.history_3[ego_id]
-        feature_vectors[ego_id]['3history_2'] = self.history_2[ego_id]
-        feature_vectors[ego_id]['4history_1'] = self.history_1[ego_id]
-        feature_vectors[ego_id]['5current_stats'] = feature_vector_current
+    if self.use_hist_info:
+        for ego_id, feature_vector_current in feature_vectors_current_flatten.items():
+            feature_vectors[ego_id]['1hist_4'] = self.hist_info['hist_4'][ego_id]
+            feature_vectors[ego_id]['2hist_3'] = self.hist_info['hist_3'][ego_id]
+            feature_vectors[ego_id]['3hist_2'] = self.hist_info['hist_2'][ego_id]
+            feature_vectors[ego_id]['4hist_1'] = self.hist_info['hist_1'][ego_id]
+            feature_vectors[ego_id]['5current'] = feature_vector_current
 
-        self.history_4[ego_id] = self.history_3[ego_id]
-        self.history_3[ego_id] = self.history_2[ego_id]
-        self.history_2[ego_id] = self.history_1[ego_id]
-        self.history_1[ego_id] = feature_vector_current
-    feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
-                                       feature_vectors.items()}
+            self.hist_info['hist_4'][ego_id] = self.hist_info['hist_3'][ego_id]
+            self.hist_info['hist_3'][ego_id] = self.hist_info['hist_2'][ego_id]
+            self.hist_info['hist_2'][ego_id] = self.hist_info['hist_1'][ego_id]
+            self.hist_info['hist_1'][ego_id] = feature_vector_current
+        feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
+                                   feature_vectors.items()}
+    else:
+        for ego_id, feature_vector_current in feature_vectors_current.items():
+            feature_vectors[ego_id] = feature_vector_current
+        feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
+                                   feature_vectors.items()}
 
-    return feature_vectors_current, feature_vectors, feature_vectors_flatten
+    shared_feature_flatten = {ego_id: flatten_to_1d(shared_feature_vector) for ego_id, shared_feature_vector in
+                                shared_feature_vectors_current.items()}
+
+    return feature_vectors_current, feature_vectors_current_flatten, feature_vectors, feature_vectors_flatten
+    # return shared_feature_vectors_current, shared_feature_flatten, feature_vectors, feature_vectors_flatten
 def compute_hierarchical_ego_vehicle_features(
         self,
         hdv_statistics: Dict[str, List[Union[float, str, Tuple[int]]]],
@@ -787,12 +803,12 @@ def compute_hierarchical_ego_vehicle_features(
             right_lane = f'{ego_statistics[ego_id][3]}_{ego_lane_index - 1}'
             right_lane_stats[ego_id] = all_lane_stats[right_lane]
         else:
-            right_lane_stats[ego_id] = np.ones(6)
+            right_lane_stats[ego_id] = np.zeros(6)
         if ego_lane_index < edge_lane_num[ego_statistics[ego_id][3]]-1:
             left_lane = f'{ego_statistics[ego_id][3]}_{ego_lane_index + 1}'
             left_lane_stats[ego_id] = all_lane_stats[left_lane]
         else:
-            left_lane_stats[ego_id]= np.ones(6)
+            left_lane_stats[ego_id]= np.zeros(6)
 
     # convert to 2D array (18 * 6)
     all_lane_stats = np.array(list(all_lane_stats.values()))
@@ -843,21 +859,25 @@ def compute_hierarchical_ego_vehicle_features(
     feature_vectors_current_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
                                feature_vectors_current.items()}
     feature_vectors = {key: {} for key in ego_statistics.keys()}
-    for ego_id, feature_vector_current in feature_vectors_current_flatten.items():
-        feature_vectors[ego_id]['1history_4'] = self.history_4[ego_id]
-        feature_vectors[ego_id]['2history_3'] = self.history_3[ego_id]
-        feature_vectors[ego_id]['3history_2'] = self.history_2[ego_id]
-        feature_vectors[ego_id]['4history_1'] = self.history_1[ego_id]
-        feature_vectors[ego_id]['5current_stats'] = feature_vector_current
+    if self.use_hist_info:
+        for ego_id, feature_vector_current in feature_vectors_current_flatten.items():
+            feature_vectors[ego_id]['1hist_4'] = self.hist_info['hist_4'][ego_id]
+            feature_vectors[ego_id]['2hist_3'] = self.hist_info['hist_3'][ego_id]
+            feature_vectors[ego_id]['3hist_2'] = self.hist_info['hist_2'][ego_id]
+            feature_vectors[ego_id]['4hist_1'] = self.hist_info['hist_1'][ego_id]
+            feature_vectors[ego_id]['5current'] = feature_vector_current
 
-        self.history_4[ego_id] = self.history_3[ego_id]
-        self.history_3[ego_id] = self.history_2[ego_id]
-        self.history_2[ego_id] = self.history_1[ego_id]
-        self.history_1[ego_id] = feature_vector_current
+            self.hist_info['hist_4'][ego_id] = self.hist_info['hist_3'][ego_id]
+            self.hist_info['hist_3'][ego_id] = self.hist_info['hist_2'][ego_id]
+            self.hist_info['hist_2'][ego_id] = self.hist_info['hist_1'][ego_id]
+            self.hist_info['hist_1'][ego_id] = feature_vector_current
+    else:
+        for ego_id, feature_vector_current in feature_vectors_current_flatten.items():
+            feature_vectors[ego_id] = feature_vector_current
     feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
                                        feature_vectors.items()}
 
-    return feature_vectors_current, feature_vectors, feature_vectors_flatten
+    return feature_vectors_current, feature_vectors_current_flatten, feature_vectors, feature_vectors_flatten
 def compute_hierarchical_ego_vehicle_features_ITSCversion(
         hdv_statistics: Dict[str, List[Union[float, str, Tuple[int]]]],
         ego_statistics: Dict[str, List[Union[float, str, Tuple[int]]]],
@@ -1054,12 +1074,17 @@ def compute_centralized_vehicle_features(lane_statistics, feature_vectors, bottl
 
     return shared_features
 
-def compute_centralized_vehicle_features_hierarchical_version(shared_obs_size, lane_statistics, feature_vectors, feature_vectors_flatten, ego_ids):
+def compute_centralized_vehicle_features_hierarchical_version(
+        obs_size, shared_obs_size, lane_statistics,
+        feature_vectors_current, feature_vectors_current_flatten,
+        feature_vectors, feature_vectors_flatten, ego_ids):
     shared_features = {}
+    actor_features = {}
 
     for ego_id in feature_vectors.keys():
-        shared_features[ego_id] = feature_vectors[ego_id].copy()
-
+        actor_features[ego_id] = feature_vectors[ego_id].copy() # shared_features--actor / critic , can there output different obs to actor and critic?
+    for ego_id in feature_vectors_current.keys():
+        shared_features[ego_id] = feature_vectors_current[ego_id].copy()
     def flatten_to_1d(data_dict):
         flat_list = []
         for key, item in data_dict.items():
@@ -1071,14 +1096,18 @@ def compute_centralized_vehicle_features_hierarchical_version(shared_obs_size, l
 
     shared_features_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
                                shared_features.items()}
+    actor_features_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
+                               actor_features.items()}
     if len(shared_features_flatten) != len(ego_ids):
         for ego_id in feature_vectors_flatten.keys():
             if ego_id not in shared_features_flatten:
-                # shared_features_flatten[ego_id] = np.zeros(435)  # 435 is the length of the ITSC version
-                # shared_features_flatten[ego_id] = np.zeros(105)  # 105 is the length of the hierarchical version
-                shared_features_flatten[ego_id] = np.zeros(shared_obs_size*5)
+                shared_features_flatten[ego_id] = np.zeros(shared_obs_size)
+    if len(actor_features_flatten) != len(ego_ids):
+        for ego_id in feature_vectors_flatten.keys():
+            if ego_id not in actor_features_flatten:
+                actor_features_flatten[ego_id] = np.zeros(obs_size)
     if len(shared_features_flatten) != len(ego_ids):
         print("Error: len(shared_features_flatten) != len(ego_ids)")
     if len(feature_vectors_flatten) != len(ego_ids):
         print("Error: len(feature_vectors_flatten) != len(ego_ids)")
-    return shared_features, shared_features_flatten
+    return actor_features, actor_features_flatten, shared_features, shared_features_flatten

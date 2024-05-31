@@ -100,7 +100,7 @@ class OnPolicyBaseRunner:
         # 默认使用EP作为state_type
         # EP：EnvironmentProvided global state (EP)：环境提供的全局状态
         # FP：Featured-Pruned Agent-Specific Global State (FP)： 特征裁剪的特定智能体全局状态(不同agent的全局状态不同, 需要agent number)
-        self.state_type = env_args.get("state_type", "EP")
+        self.state_type = env_args.get("state_type", "FP")
 
         # 智能体数量
         self.num_agents = get_num_agents(args["env"], env_args, self.envs)

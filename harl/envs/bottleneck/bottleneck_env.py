@@ -35,6 +35,8 @@ def make_bottleneck_envs(args):
     cautious = args['cautious']
     normal = args['normal']
     strategy = args['strategy']
+    use_hist_info = args['use_hist_info']
+    hist_length = args['hist_length']
 
     veh_env = VehEnvironment(
         sumo_cfg=sumo_cfg,
@@ -62,6 +64,8 @@ def make_bottleneck_envs(args):
         cautious=cautious,
         normal=normal,
         strategy=strategy,
+        use_hist_info=use_hist_info,
+        hist_length=hist_length,
     )
     return veh_env
 
