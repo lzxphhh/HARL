@@ -22,6 +22,7 @@ IPPO_for_curve_map_single
 
 """
 --algo <ALGO> --env <ENV> --exp_name <EXPERIMENT NAME>
+--algo mappo --env bottleneck --exp_name 0601_test
 or
 --load_config <TUNED CONFIG PATH> --exp_name <EXPERIMENT NAME>
 """

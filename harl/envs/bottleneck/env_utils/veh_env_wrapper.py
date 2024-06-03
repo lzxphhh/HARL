@@ -51,6 +51,7 @@ class VehEnvWrapper(gym.Wrapper):
 
     def __init__(self, env: Env,
                  name_scenario: str,  # 场景的名称
+                 max_num_CAVs: int,  # 最大的 CAV 数量
                  CAV_penetration: float,  # HDV 的数量
                  num_CAVs: int,  # CAV 的数量
                  num_HDVs: int,  # HDV 的数量
@@ -72,6 +73,7 @@ class VehEnvWrapper(gym.Wrapper):
                  ) -> None:
         super().__init__(env)
         self.name_scenario = name_scenario
+        self.max_num_CAVs = max_num_CAVs
         self.CAV_penetration = CAV_penetration
         self.num_CAVs = num_CAVs
         self.num_HDVs = num_HDVs
@@ -129,7 +131,9 @@ class VehEnvWrapper(gym.Wrapper):
         # all hdv + all cav + all lanes + bottleneck + road structure + self stats + surround hdv + surround cav + surround lanes
         hier_obs_size = num_HDVs*13 + num_CAVs*13 + 18*6 + 2 + 10 + 13 + 4*6 + 4*6 + 3*6
         # road structure + self stats + surround vehs + surround lanes
-        base_obs_size = 10 + 13 + 3*6 + 3*6
+        # base_obs_size = 10 + 13 + 3*6 + 3*6
+        # FP-target position（根据当前位置、静态地图、车道特征筛选） + self stats + surround vehs
+        base_obs_size = 2 + 3 + 3 * 6
         if self.strategy == 'hierarchical':
             self.self_obs_size = hier_obs_size
         elif self.strategy == 'base':
@@ -137,12 +141,19 @@ class VehEnvWrapper(gym.Wrapper):
         elif self.strategy == 'attention':
             self.self_obs_size = hier_obs_size
         self.hist_info = {}
-        # road structure + self stats + surround vehs + all lanes
+        # FP-road structure + self stats + surround vehs + all lanes
         # self.shared_obs_size = 10 + 13 + 3 * 6 + 18 * 6
-        # road structure + self stats + surround vehs + surround lanes
-        self.shared_obs_size = self.self_obs_size
+        # FP-road structure + self stats + surround vehs + surround lanes
+        # self.shared_obs_size = self.self_obs_size
+        # FP-target position（根据当前位置、静态地图、车道特征筛选） + self stats + surround vehs
+        # self.shared_obs_size = 2 + 3 + 3 * 6
+        # FP-road structure + self stats + surround vehs + all cavs + all lanes
+        self.shared_obs_size = 2 + 3 + 3 * 6 + 3 * self.max_num_CAVs + 18 * 3
+        # EP-road structure + cav stats + all lanes
+        # self.shared_obs_size = 10 + 3 * self.max_num_CAVs + 18 * 6
         if self.use_hist_info:
             self.obs_size = self.self_obs_size * (self.hist_length+1)
+            # self.obs_size = self.self_obs_size
             for i in range(self.hist_length):
                 self.hist_info[f'hist_{i+1}'] = {ego_id: np.zeros(self.self_obs_size) for ego_id in self.ego_ids}
         else:
@@ -647,8 +658,8 @@ class VehEnvWrapper(gym.Wrapper):
                 # inidividual_rew_ego[veh_id] += 1 * individual_speed_r
 
                 # CAV车辆的target速度越靠近最大速度，reward越高 - [0, 5]
-                individual_speed_r_simple = -abs(speed - max_speed) / max_speed * 5 + 5
-                inidividual_rew_ego[veh_id] += individual_speed_r_simple * 1
+                individual_speed_r_simple = (-abs(speed - max_speed) / max_speed * 5 + 5) * 2
+                inidividual_rew_ego[veh_id] += individual_speed_r_simple
 
                 # # CAV车辆的等待时间越短，reward越高 - (-infty,0]
                 # individual_accumulated_waiting_time_r = -accumulated_waiting_time
@@ -667,14 +678,14 @@ class VehEnvWrapper(gym.Wrapper):
                         # CAV车辆的警告距离越远，reward越高 - [0, 5]
                         individual_warn_r += -(WARN_GAP_THRESHOLD - dis) / (
                                 WARN_GAP_THRESHOLD - GAP_THRESHOLD) * 10  # [-10, 0]
-                    inidividual_rew_ego[veh_id] += individual_warn_r * 0.1
+                    inidividual_rew_ego[veh_id] += individual_warn_r * 0.25
 
                 if veh_id in self.coll_ego_ids.keys():
                     individual_coll_r = 0
                     for dis in self.coll_ego_ids[veh_id]:
                         # CAV车辆的碰撞距离越远，reward越高 - [0, 5]
                         individual_coll_r += -(GAP_THRESHOLD - dis) / GAP_THRESHOLD * 20 - 10  # [-30, -10]
-                    inidividual_rew_ego[veh_id] += individual_coll_r * 0.1
+                    inidividual_rew_ego[veh_id] += individual_coll_r * 0.25
 
                 # 计算局部地区的reward
                 if road_id in self.bottle_necks + ['E3', 'E2', 'E1', 'E0']:
@@ -691,8 +702,8 @@ class VehEnvWrapper(gym.Wrapper):
                     time_penalty_ego[veh_id] = -15
                     is_in_bottleneck[veh_id] = 0
 
-                if inidividual_rew_ego[veh_id] == speed:
-                    time_penalty_ego[veh_id] = 200 * (1 / (1 + np.exp(0-speed)) - 1)
+                if inidividual_rew_ego[veh_id] == individual_speed_r_simple:
+                    time_penalty_ego[veh_id] = 40 * (1 / (1 + np.exp(0-speed)) - 1)
                     # time_penalty_ego[veh_id] = 100 * (math.tanh(speed) - 1)
                 else:
                     time_penalty_ego[veh_id] = 0
@@ -768,7 +779,7 @@ class VehEnvWrapper(gym.Wrapper):
         rewards = {key: inidividual_rew_ego[key] \
                         # + range_reward_ego[key] \
                         # + is_in_bottleneck[key] * bottleneck_reward_ego[key] \
-                        + time_penalty_ego[key] \
+                        # + time_penalty_ego[key] \
                         + global_ego_speed_r \
                         # + global_ego_mean_speed_r \
                         # + global_ego_waiting_time_r \

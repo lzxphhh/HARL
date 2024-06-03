@@ -20,6 +20,7 @@ def make_bottleneck_envs(args):
 
     # for veh wrapper
     scene_name = args['scene_name']
+    max_num_CAVs = args['max_num_CAVs']
     num_CAVs = args['num_CAVs']
     num_HDVs = args['num_HDVs']
     penetration_CAV = args['penetration_CAV']
@@ -48,6 +49,7 @@ def make_bottleneck_envs(args):
     veh_env = VehEnvWrapper(
         env=veh_env,
         name_scenario=scene_name,
+        max_num_CAVs=max_num_CAVs,
         num_CAVs=num_CAVs,
         num_HDVs=num_HDVs,
         CAV_penetration=penetration_CAV,
