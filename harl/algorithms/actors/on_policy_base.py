@@ -6,34 +6,36 @@ from harl.utils.models_tools import update_linear_schedule
 
 
 class OnPolicyBase:
+    # MAPPO and HAPPO inherit from this class
     def __init__(self, args, obs_space, act_space, device=torch.device("cpu")):
         """Initialize Base class.
         Args:
-            args: (dict) arguments.
-            obs_space: (gym.spaces or list) observation space.
-            act_space: (gym.spaces) action space.
+            args: (dict) arguments.  # yaml里面的model和algo的config打包作为args进入OnPolicyBase
+            obs_space: (gym.spaces or list) observation space. # 单个智能体的观测空间 eg: Box (18,)
+            act_space: (gym.spaces) action space. # 单个智能体的动作空间 eg: Discrete(5,)
             device: (torch.device) device to use for tensor operations.
         """
         # save arguments
+        # "model" and "algo" sections in $Algorithm config file
         self.args = args
         self.device = device
-        self.tpdv = dict(dtype=torch.float32, device=device)
+        self.tpdv = dict(dtype=torch.float32, device=device)   # dtype和device
 
-        self.data_chunk_length = args["data_chunk_length"]
-        self.use_recurrent_policy = args["use_recurrent_policy"]
+        self.data_chunk_length = args["data_chunk_length"]  # TODO：这是什么 rnn相关
+        self.use_recurrent_policy = args["use_recurrent_policy"]  # TODO：这两个的区别，基于rnn chunck是什么
         self.use_naive_recurrent_policy = args["use_naive_recurrent_policy"]
-        self.use_policy_active_masks = args["use_policy_active_masks"]
-        self.action_aggregation = args["action_aggregation"]
+        self.use_policy_active_masks = args["use_policy_active_masks"]  # TODO：这是什么
+        self.action_aggregation = args["action_aggregation"]  # TODO：这是什么
 
-        self.lr = args["lr"]
-        self.opti_eps = args["opti_eps"]
-        self.weight_decay = args["weight_decay"]
+        self.lr = args["lr"]  # actor学习率
+        self.opti_eps = args["opti_eps"]  # optimizer的epsilon
+        self.weight_decay = args["weight_decay"] # optimizer的权重衰减
         # save observation and action spaces
         self.obs_space = obs_space
         self.act_space = act_space
-        # create actor network
+        # 建立actor网络结构
         self.actor = StochasticPolicy(args, self.obs_space, self.act_space, self.device)
-        # create actor optimizer
+        # 建立actor的优化器optimizer
         self.actor_optimizer = torch.optim.Adam(
             self.actor.parameters(),
             lr=self.lr,
@@ -43,6 +45,7 @@ class OnPolicyBase:
 
     def lr_decay(self, episode, episodes):
         """Decay the learning rates.
+        episode是当前episode的index，episodes是总共需要跑多少个episode
         Args:
             episode: (int) current training episode.
             episodes: (int) total number of training episodes.
@@ -52,14 +55,20 @@ class OnPolicyBase:
     def get_actions(
         self, obs, rnn_states_actor, masks, available_actions=None, deterministic=False
     ):
-        """Compute actions for the given inputs.
-        Args:
-            obs: (np.ndarray) local agent inputs to the actor.
+        """Compute actions for the given inputs. 可以对应OnPolicyActorBuffer中在某一个step下的信息
+        输入:
+            obs: (np.ndarray) local agent inputs to the actor. 所有环境下当前时刻某个agent的obs 【thread_num, obs_dim】
             rnn_states_actor: (np.ndarray) if actor has RNN layer, RNN states for actor.
-            masks: (np.ndarray) denotes points at which RNN states should be reset.
+                                上一时刻的rnn_state 【thread_num, rnn层数，rnn_state_dim】
+            masks: (np.ndarray) denotes points at which RNN states should be reset. 【thread_num, 1】
             available_actions: (np.ndarray) denotes which actions are available to agent
-                                 (if None, all actions available)
+                                 当前智能体的可用动作 (if None, all actions available) 【thread_num, act_dim】
             deterministic: (bool) whether the action should be mode of distribution or should be sampled.
+                                有没有available_actions
+        输出:
+            actions: (torch.Tensor) actions for the given inputs. 【thread_num, 1】
+            action_log_probs: (torch.Tensor) log probabilities of actions. 【thread_num, 1】
+            rnn_states_actor: (torch.Tensor) updated RNN states for actor. 【thread_num, rnn层数，rnn_state_dim】
         """
         actions, action_log_probs, rnn_states_actor = self.actor(
             obs, rnn_states_actor, masks, available_actions, deterministic
@@ -134,4 +143,5 @@ class OnPolicyBase:
 
     def prep_rollout(self):
         """Prepare for rollout."""
+        # 测试actor网络结构
         self.actor.eval()

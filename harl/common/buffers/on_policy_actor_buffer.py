@@ -12,21 +12,31 @@ class OnPolicyActorBuffer:
     def __init__(self, args, obs_space, act_space):
         """Initialize on-policy actor buffer.
         Args:
-            args: (dict) arguments
-            obs_space: (gym.Space or list) observation space
-            act_space: (gym.Space) action space
+            args: (dict) arguments # yaml里model和algo的config打包作为args进入OnPolicyActorBuffer
+            obs_space: (gym.Space or list) observation space # 单个智能体的观测空间 eg: Box (18,)
+            act_space: (gym.Space) action space # 单个智能体的动作空间 eg: Discrete(5,)
         """
-        self.episode_length = args["episode_length"]
-        self.n_rollout_threads = args["n_rollout_threads"]
-        self.hidden_sizes = args["hidden_sizes"]
-        self.rnn_hidden_size = self.hidden_sizes[-1]
-        self.recurrent_n = args["recurrent_n"]
+        self.episode_length = args["episode_length"]  # 每个环境的episode长度
+        self.n_rollout_threads = args["n_rollout_threads"]  # 多进程环境数量
+        self.hidden_sizes = args["hidden_sizes"]  # actor网络的隐藏层大小
+        self.rnn_hidden_size = self.hidden_sizes[-1]  # rnn隐藏层大小
+        self.recurrent_n = args["recurrent_n"]  # rnn的层数
 
-        obs_shape = get_shape_from_obs_space(obs_space)
+        obs_shape = get_shape_from_obs_space(obs_space)  # 获取单个智能体观测空间的形状，tuple of integer. eg: （18，）
 
         if isinstance(obs_shape[-1], list):
             obs_shape = obs_shape[:1]
 
+        """
+        Actor Buffer里储存了： ALL (np.ndarray)
+        1. self.obs: local agent inputs to the actor. # 当前智能体的输入 [episode_length+1, 进程数量, obs_shape]
+        2. self.rnn_states: rnn states of the actor. # 当前智能体的rnn状态 [episode_length+1, 进程数量, rnn层数, rnn层大小]
+        3. self.available_actions: available actions of the actor. # 当前智能体的可用动作（仅离散） [episode_length+1, 进程数量, 动作空间大小]
+        4. self.actions: actions of the actor. # 当前智能体的动作 [episode_length, 进程数量, 1（单个离散）]
+        5. self.action_log_probs: action log probs of the actor. # 当前智能体选取的动作的log概率 [episode_length, 进程数量, 1（单个离散）]
+        6. self.masks: 这个agent每一步的mask,是否done (rnn需要reset)  [episode_length+1, 进程数量, 1]
+        7. self.active_masks:这个agent每一步的是否存活[episode_length+1, 进程数量, 1]
+        """
         # Buffer for observations of this actor.
         self.obs = np.zeros(
             (self.episode_length + 1, self.n_rollout_threads, *obs_shape),
@@ -53,6 +63,7 @@ class OnPolicyActorBuffer:
         else:
             self.available_actions = None
 
+        # 获取动作空间的维度，integer. eg: 1-》单个离散，
         act_shape = get_shape_from_act_space(act_space)
 
         # Buffer for actions of this actor.
@@ -66,17 +77,22 @@ class OnPolicyActorBuffer:
         )
 
         # Buffer for masks of this actor. Masks denotes at which point should the rnn states be reset.
+        # 当前这个agent在不同并行环境的不同时间点是否done，如果done，那么就需要reset rnn
         self.masks = np.ones((self.episode_length + 1, self.n_rollout_threads, 1), dtype=np.float32)
 
         # Buffer for active masks of this actor. Active masks denotes whether the agent is alive.
+        # 当前这个agent在不同并行环境的不同时间点是否存活，如果不存活，那么就不需要计算loss，不需要更新参数
         self.active_masks = np.ones_like(self.masks)
 
+        # happo的参数
         self.factor = None
 
+        # 当前所有并行环境的当前步数
         self.step = 0
 
     def update_factor(self, factor):
-        """Save factor for this actor."""
+        """Save factor for this actor.
+        只有on_policy_ha_runner调用了这个函数"""
         self.factor = factor.copy()
 
     def insert(
@@ -135,7 +151,7 @@ class OnPolicyActorBuffer:
         ]
 
         # Combine the first two dimensions (episode_length and n_rollout_threads) to form batch.
-        # Take obs shape as an example: 
+        # Take obs shape as an example:
         # (episode_length + 1, n_rollout_threads, *obs_shape) --> (episode_length, n_rollout_threads, *obs_shape)
         # --> (episode_length * n_rollout_threads, *obs_shape)
         obs = self.obs[:-1].reshape(-1, *self.obs.shape[2:])
@@ -152,9 +168,9 @@ class OnPolicyActorBuffer:
             factor = self.factor.reshape(-1, self.factor.shape[-1])
         advantages = advantages.reshape(-1, 1)
 
-        
+
         for indices in sampler:
-            # obs shape: 
+            # obs shape:
             # (episode_length * n_rollout_threads, *obs_shape) --> (mini_batch_size, *obs_shape)
             obs_batch = obs[indices]
             rnn_states_batch = rnn_states[indices]
@@ -179,7 +195,7 @@ class OnPolicyActorBuffer:
 
     def naive_recurrent_generator_actor(self, advantages, actor_num_mini_batch):
         """Training data generator for actor that uses RNN network.
-        This generator does not split the trajectories into chunks, 
+        This generator does not split the trajectories into chunks,
         and therefore maybe less efficient than the recurrent_generator_actor in training.
         """
 
@@ -214,7 +230,7 @@ class OnPolicyActorBuffer:
             if self.factor is not None:
                 factor_batch = _flatten(T, N, self.factor[:, ids])
             rnn_states_batch = self.rnn_states[0, ids]
-            
+
             if self.factor is not None:
                 yield obs_batch, rnn_states_batch, actions_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, adv_targ, available_actions_batch, factor_batch
             else:
@@ -222,14 +238,20 @@ class OnPolicyActorBuffer:
 
     def recurrent_generator_actor(self, advantages, actor_num_mini_batch, data_chunk_length):
         """Training data generator for actor that uses RNN network.
-        This generator splits the trajectories into chunks of length data_chunk_length, 
+        当actor是RNN时，使用这个生成器。
+        把轨迹分成长度为data_chunk_length的块，因此比naive_recurrent_generator_actor在训练时更有效率。
+        This generator splits the trajectories into chunks of length data_chunk_length,
         and therefore maybe more efficient than the naive_recurrent_generator_actor in training.
         """
 
         # get episode_length, n_rollout_threads, and mini_batch_size
+        # trajectory长度，进程数
         episode_length, n_rollout_threads = self.actions.shape[0:2]
+        # batch_size = 进程数 * trajectory长度 (收集一次数据)
         batch_size = n_rollout_threads * episode_length
+        # 把所有时间步根据data_chunk_length分成多个组时间步
         data_chunks = batch_size // data_chunk_length
+        # 把data_chunks分成actor_num_mini_batch份
         mini_batch_size = data_chunks // actor_num_mini_batch
 
         assert episode_length % data_chunk_length == 0, (
@@ -291,7 +313,7 @@ class OnPolicyActorBuffer:
                 rnn_states_batch.append(rnn_states[ind])  # only the beginning rnn states are needed
                 if self.factor is not None:
                     factor_batch.append(factor[ind : ind + data_chunk_length])
-            
+
             L, N = data_chunk_length, mini_batch_size
             # These are all ndarrays of size (data_chunk_length, mini_batch_size, *dim)
             obs_batch = np.stack(obs_batch, axis=1)
@@ -321,6 +343,7 @@ class OnPolicyActorBuffer:
             old_action_log_probs_batch = _flatten(L, N, old_action_log_probs_batch)
             adv_targ = _flatten(L, N, adv_targ)
             if self.factor is not None:
+                # 注意以下这里的factor - happo
                 yield obs_batch, rnn_states_batch, actions_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, adv_targ, available_actions_batch, factor_batch
             else:
                 yield obs_batch, rnn_states_batch, actions_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, adv_targ, available_actions_batch
