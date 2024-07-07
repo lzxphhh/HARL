@@ -134,8 +134,12 @@ class VehEnvWrapper(gym.Wrapper):
         # individual part: target(2) + self stats(13) + action(3) + surround CAVs(6*6) + surround HDVs(6*6) + surround lanes(3*6)
         hier_obs_size = 10 + 2 + 2 + self.max_num_CAVs*6 + self.max_num_HDVs*6 + 18*6 \
                         + 2 + 4 + 13 + 6*6 + 6*6 + 3*6 +3
+        # road structure + self stats + surround vehs + surround lanes
+        # base_obs_size = 3 + 2 + 2 + 3 * 6
+        base_obs_size = 2 + 3 + 2 + 2 + 3 * 6 + 2 + 2
+        # base_obs_size = 10 + 13 + 3 * 6 + 3 * 6
         # FP-target position（根据当前位置、静态地图、车道特征筛选） + self stats + surround vehs
-        base_obs_size = 2 + 3 + 3 * 6
+        # base_obs_size = 2 + 3 + 3 * 6
         if self.strategy == 'hierarchical':
             self.self_obs_size = hier_obs_size
         elif self.strategy == 'base':
@@ -153,7 +157,10 @@ class VehEnvWrapper(gym.Wrapper):
         # FP-individual part: target(2) + self stats(13) + surround vehs(6*3)
         # self.shared_obs_size = 10 + 2 + 2 + self.max_num_CAVs*6 + self.max_num_HDVs*6 + 18*6  # EP mode
                                # + 2 + 13 + 6*3
-        self.shared_obs_size = hier_obs_size  # FP mode
+        self.shared_obs_size = hier_obs_size  # EP mode (FP extended)
+        # self.shared_obs_size = 3 * self.max_num_CAVs + 18 * 3
+        # EP-road structure + cav stats
+        # self.shared_obs_size = 2 + 2 + 3 * self.max_num_CAVs + 18 * 3  ####baseline
         if self.use_hist_info:
             self.obs_size = self.self_obs_size * (self.hist_length+1)
             for i in range(self.hist_length):
@@ -688,7 +695,7 @@ class VehEnvWrapper(gym.Wrapper):
                     individual_coll_r = 0
                     for dis in self.coll_ego_ids[veh_id]:
                         # CAV车辆的碰撞距离越远，reward越高 - [0, 5]
-                        individual_coll_r += -(GAP_THRESHOLD - dis) / GAP_THRESHOLD * 40 - 10  # [-30, -10]
+                        individual_coll_r += -(GAP_THRESHOLD - dis) / GAP_THRESHOLD * 20 - 10  # [-30, -10]
                     inidividual_rew_ego[veh_id] += individual_coll_r * 0.05
 
                 # 计算局部地区的reward

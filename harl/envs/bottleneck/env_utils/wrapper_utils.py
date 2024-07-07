@@ -590,7 +590,7 @@ def compute_base_ego_vehicle_features(
         lane_info[2] = lane_info[2] / 700
         lane_info[3] = lane_info[3] / 15
         all_lane_stats[lane_id] = lane_info[:4] + lane_info[6:7] + lane_info[13:14]
-        all_lane_state_simple[lane_id] = lane_info[:1] + lane_info[3:4] + lane_info[6:7]
+        all_lane_state_simple[lane_id] = lane_info[1:2] + lane_info[3:4] + lane_info[6:7]
 
     ego_lane_stats = {}
     left_lane_stats = {}
@@ -620,12 +620,10 @@ def compute_base_ego_vehicle_features(
     bottle_neck_position_y = bottle_neck_positions[1]
 
     feature_vector = {}
-    # feature_vector['hdv_stats'] = hdv_stats
-    # feature_vector['cav_stats'] = cav_stats
-    # feature_vector['all_lane_stats'] = all_lane_stats
-    # feature_vector['bottle_neck_position'] = np.array([bottle_neck_position_x, bottle_neck_position_y])
-    feature_vector['road_structure'] = np.array([0, 0, bottle_neck_position_x, bottle_neck_position_y, 4,
-                                                 bottle_neck_position_x, bottle_neck_position_y, 1, 0, 2])
+    # feature_vector['road_structure'] = np.array([0, 0, bottle_neck_position_x, bottle_neck_position_y, 4,
+    #                                              bottle_neck_position_x, bottle_neck_position_y, 1, 0, 2])
+    feature_vector['road_end'] = np.array([1, 0])
+    feature_vector['bottleneck'] = np.array([bottle_neck_position_x, bottle_neck_position_y])
     # A function to flatten a dictionary structure into 1D array
     def flatten_to_1d(data_dict):
         flat_list = []
@@ -640,51 +638,32 @@ def compute_base_ego_vehicle_features(
     veh_target = get_target(ego_statistics, lane_statistics)
     feature_vectors_current = {}
     shared_feature_vectors_current = {}
-    global_feature_vectors = {}
-    FP_Target_feature_vectors = {key: {} for key in ego_statistics}
-    FP_Target_shared_feature_vectors = {key: {} for key in ego_statistics}
     flat_surround_vehs = {key: [] for key in veh_target}
     for ego_id in ego_statistics.keys():
         feature_vectors_current[ego_id] = feature_vector.copy()
-        feature_vectors_current[ego_id]['self_stats'] = ego_stats[ego_id]
+        feature_vectors_current[ego_id]['self_stats'] = ego_stats[ego_id][:3]
+        feature_vectors_current[ego_id]['target'] = veh_target[ego_id]
+        feature_vectors_current[ego_id]['distance_bott'] = np.array([bottle_neck_position_x - ego_stats[ego_id][0], 0])
+        feature_vectors_current[ego_id]['distance_end'] = np.array([1 - ego_stats[ego_id][0], 0])
         flat_surround_vehs[ego_id] = [item for sublist in surround_vehs_stats[ego_id] for item in sublist]
         if len(flat_surround_vehs[ego_id]) < 18:
             flat_surround_vehs[ego_id] += [0] * (18 - len(flat_surround_vehs[ego_id]))
         feature_vectors_current[ego_id]['surround_vehs_stats'] = flat_surround_vehs[ego_id]
-        feature_vectors_current[ego_id]['ego_lane_stats'] = ego_lane_stats[ego_id]
-        feature_vectors_current[ego_id]['left_lane_stats'] = left_lane_stats[ego_id]
-        feature_vectors_current[ego_id]['right_lane_stats'] = right_lane_stats[ego_id]
+        # feature_vectors_current[ego_id]['ego_lane_stats'] = ego_lane_stats[ego_id]
+        # feature_vectors_current[ego_id]['left_lane_stats'] = left_lane_stats[ego_id]
+        # feature_vectors_current[ego_id]['right_lane_stats'] = right_lane_stats[ego_id]
 
         shared_feature_vectors_current[ego_id] = feature_vector.copy()
-        shared_feature_vectors_current[ego_id]['self_stats'] = ego_stats[ego_id]
-        shared_feature_vectors_current[ego_id]['surround_vehs_stats'] = flat_surround_vehs[ego_id]
-        shared_feature_vectors_current[ego_id]['all_lane_stats'] = all_lane_stats
-
-        global_feature_vectors[ego_id] = feature_vector.copy()
-        global_feature_vectors[ego_id]['cav_stats'] = global_cav
-        global_feature_vectors[ego_id]['all_lane_stats'] = all_lane_stats
-
-        FP_Target_feature_vectors[ego_id]['target'] = veh_target[ego_id]
-        FP_Target_feature_vectors[ego_id]['self_stats'] = ego_stats[ego_id][:3]
-        FP_Target_feature_vectors[ego_id]['surround_vehs_stats'] = flat_surround_vehs[ego_id]
-
-        FP_Target_shared_feature_vectors[ego_id]['target'] = veh_target[ego_id]
-        FP_Target_shared_feature_vectors[ego_id]['self_stats'] = ego_stats[ego_id][:3]
-        FP_Target_shared_feature_vectors[ego_id]['surround_vehs_stats'] = flat_surround_vehs[ego_id]
-        FP_Target_shared_feature_vectors[ego_id]['road_structure'] = feature_vector['road_structure']
-        FP_Target_shared_feature_vectors[ego_id]['cav_stats'] = global_cav
-        # FP_Target_shared_feature_vectors[ego_id]['all_lane_stats'] = all_lane_state_simple
-
-    global_feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in global_feature_vectors.items()}
+        shared_feature_vectors_current[ego_id]['cav_stats'] = global_cav
+        shared_feature_vectors_current[ego_id]['lane_stats'] = all_lane_state_simple
 
     # Flatten the dictionary structure
     feature_vectors_current_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
                                feature_vectors_current.items()}
-    FP_Target_feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in FP_Target_feature_vectors.items()}
     feature_vectors = {key: {} for key in ego_statistics.keys()}
     if self.use_hist_info:
         # for ego_id, feature_vector_current in feature_vectors_current_flatten.items():
-        for ego_id, feature_vector_current in FP_Target_feature_vectors_flatten.items():
+        for ego_id, feature_vector_current in feature_vectors_current_flatten.items():
             if ego_id not in feature_vectors:
                 print('ego_id not in feature_vectors')
             if ego_id not in self.hist_info['hist_4']:
@@ -702,19 +681,14 @@ def compute_base_ego_vehicle_features(
         feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
                                    feature_vectors.items()}
     else:
-        for ego_id, feature_vector_current in FP_Target_feature_vectors.items():
+        for ego_id, feature_vector_current in feature_vectors_current.items():
             feature_vectors[ego_id] = feature_vector_current
         feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
                                    feature_vectors.items()}
 
     shared_feature_flatten = {ego_id: flatten_to_1d(shared_feature_vector) for ego_id, shared_feature_vector in
                                 shared_feature_vectors_current.items()}
-    FP_Target_shared_feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in FP_Target_shared_feature_vectors.items()}
-
-    return FP_Target_shared_feature_vectors, FP_Target_shared_feature_vectors_flatten, feature_vectors, feature_vectors_flatten
-    # return global_feature_vectors, global_feature_vectors_flatten, feature_vectors, feature_vectors_flatten
-    # return feature_vectors_current, feature_vectors_current_flatten, feature_vectors, feature_vectors_flatten
-    # return shared_feature_vectors_current, shared_feature_flatten, feature_vectors, feature_vectors_flatten
+    return shared_feature_vectors_current, shared_feature_flatten, feature_vectors, feature_vectors_flatten
 
 def compute_hierarchical_ego_vehicle_features(
         self,

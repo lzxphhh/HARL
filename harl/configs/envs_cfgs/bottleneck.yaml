@@ -38,6 +38,11 @@ calc_features_lane_ids: [ 'E0_0', 'E0_1',
 ]  # 计算对应的 lane 的信息
 log_path: './log/check_veh_env'
 delta_t: 1.0
+obs_size: "2(bottleneck_position) + 2(road_end) + 3(self_stats) + 2(nearest_target) + 3*6(surround_stats)"
+shared_obs_size: "2(bottleneck_position) + 2(road_end) + 3 * self.max_num_CAVs(all_CAV_stats) + 18 * 3(all_lane_stats_simple)"
+reward_weights: [(1-0.4)*1.0, (1-0.4)*0.05, (1-0.4)*0.05, 0.4*1.0, 1.0*1.0]
+reward_items: ['individual_speed_r_simple','individual_warn_r', 'individual_coll_r', 'global_ego_speed_r', 'time_penalty_ego']
+time_penalty_ego: "((self.num_CAVs-1) + self.CAV_penetration) * 10 * (1 / (1 + np.exp(5-speed)) - 1) - 1 when inidividual_rew_ego[veh_id] == individual_speed_r_simple else -1"
 
 # generate scene parameters-HDVs' driving style distribution
 aggressive: 0.2
