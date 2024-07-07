@@ -44,6 +44,7 @@ class Prediction_rep(nn.Module):
         self.leaky_relu = nn.LeakyReLU(0.1)
         self.relu = nn.ReLU()
         self.self_embedding = nn.Linear(3*5, 128)
+        self.self_a_embedding = nn.Linear(6*5, 128)
         self.dyn_embedding = nn.Linear(128, 64)
 
         self.example_extend_history = {
@@ -95,7 +96,7 @@ class Prediction_rep(nn.Module):
         # obs: (n_rollout_thread, obs_dim)
         history_5, history_4, history_3, history_2, history_1, current = self.reconstruct_history(obs)
 
-        # info_hist_5 = self.reconstruct_info(history_5)
+        info_hist_5 = self.reconstruct_info(history_5)
         info_hist_4 = self.reconstruct_info(history_4)
         info_hist_3 = self.reconstruct_info(history_3)
         info_hist_2 = self.reconstruct_info(history_2)
@@ -109,39 +110,55 @@ class Prediction_rep(nn.Module):
 
         ############################## self_state & surrounding HDVs ##############################
         # Concatenate the focal node to the rest of the nodes
-        ego_stats_hist = torch.cat((info_hist_4[6][:, :, :3], info_hist_3[6][:, :, :3], info_hist_2[6][:, :, :3],
-                          info_hist_1[6][:, :, :3], info_current[6][:, :, :3]), dim=2)
-        # hdv_motion_hist = torch.cat((info_hist_4[0][:, :, :3], info_hist_3[0][:, :, :3], info_hist_2[0][:, :, :3],
-        #                     info_hist_1[0][:, :, :3], info_current[0][:, :, :3]), dim=2)
+        ego_stats_hist = torch.cat((info_hist_5[6][:, :, :3], info_hist_4[6][:, :, :3], info_hist_3[6][:, :, :3],
+                          info_hist_2[6][:, :, :3], info_hist_1[6][:, :, :3]), dim=2)
+        hdv_stats_hist = torch.cat((info_hist_5[0][:, :, :3], info_hist_4[0][:, :, :3], info_hist_3[0][:, :, :3],
+                            info_hist_2[0][:, :, :3], info_hist_1[0][:, :, :3]), dim=2)
+        cav_stats_hist = torch.cat((info_hist_5[1][:, :, :3], info_hist_4[1][:, :, :3], info_hist_3[1][:, :, :3],
+                            info_hist_2[1][:, :, :3], info_hist_1[1][:, :, :3]), dim=2)
 
-        ego_motion_current = torch.cat((info_current[6][:, :, :3], info_current[10], info_current[9]), dim=2)
-        cav_motion_current = info_current[1]
-        ego_stats_current = info_current[6][:, :, :3]
-        cav_stats_current = info_current[1][:, :, :3]
-        hdv_stats_current = info_current[0][:, :, :3]
+        ego_motion_hist = torch.cat((info_hist_5[6][:, :, :3], info_hist_5[10], info_hist_5[9],
+                                     info_hist_4[6][:, :, :3], info_hist_4[10], info_hist_4[9],
+                                     info_hist_3[6][:, :, :3], info_hist_3[10], info_hist_3[9],
+                                     info_hist_2[6][:, :, :3], info_hist_2[10], info_hist_2[9],
+                                     info_hist_1[6][:, :, :3], info_hist_1[10], info_hist_1[9]), dim=2)
+        cav_motion_hist = torch.cat((info_hist_5[1], info_hist_4[1], info_hist_3[1], info_hist_2[1], info_hist_1[1]), dim=2)
+
+        # ego_motion_current = torch.cat((info_current[6][:, :, :3], info_current[10], info_current[9]), dim=2)
+        # cav_motion_current = info_current[1]
+        # ego_stats_current = info_current[6][:, :, :3]
+        # cav_stats_current = info_current[1][:, :, :3]
+        # hdv_stats_current = info_current[0][:, :, :3]
         # self historical embedding
         hist_ego_embedding = self.leaky_relu(self.self_embedding(ego_stats_hist))
         hist_ego_feature = hist_ego_embedding.squeeze(1)
         hist_ego_feature = self.dyn_embedding(self.leaky_relu(hist_ego_feature))
 
-        # HDV historical embedding
-        # hist_hdv_embedding = self.leaky_relu(self.dyn_embedding(self.leaky_relu(self.self_embedding(hdv_motion_hist))))
-        # historical state - GAT
-        # combined_ego2hdv_hist = torch.cat((hist_ego_embedding, hist_hdv_embedding), dim=1)
-        # ego2hdv_relation_hist = self.gat_HDV_5s(combined_ego2hdv_hist, self.adj_hdv.to(combined_ego2hdv_hist.device))
+        # historical embedding
+        hist_ego_embedding = self.leaky_relu(self.dyn_embedding(self.leaky_relu(self.self_embedding(ego_stats_hist))))
+        hist_hdv_embedding = self.leaky_relu(self.dyn_embedding(self.leaky_relu(self.self_embedding(hdv_stats_hist))))
+        # hist_cav_embedding = self.leaky_relu(self.dyn_embedding(self.leaky_relu(self.self_embedding(cav_stats_hist))))
+
+        hist_ego_a_embedding = self.leaky_relu(self.dyn_embedding(self.leaky_relu(self.self_a_embedding(ego_motion_hist))))
+        hist_cav_a_embedding = self.leaky_relu(self.dyn_embedding(self.leaky_relu(self.self_a_embedding(cav_motion_hist))))
+        # GAT
+        combined_ego2hdv_hist = torch.cat((hist_ego_embedding, hist_hdv_embedding), dim=1)
+        ego2hdv_relation_hist = self.gat_HDV_5s(combined_ego2hdv_hist, self.adj_hdv.to(combined_ego2hdv_hist.device))
+        combined_ego2cav_hist = torch.cat((hist_ego_a_embedding, hist_cav_a_embedding), dim=1)
+        ego2cav_relation_hist = self.gat_CAV_5s(combined_ego2cav_hist, self.adj_cav.to(combined_ego2cav_hist.device))
 
         # hist_ego_embedding = hist_ego_embedding.squeeze(1)
         # current state - GAT
-        combined_ego2hdv_current = torch.cat((ego_stats_current, hdv_stats_current), dim=1)
-        ego2hdv_relation_current = self.gat_HDV_1s(combined_ego2hdv_current, self.adj_hdv.to(combined_ego2hdv_current.device))
-        combined_ego2cav_current = torch.cat((ego_stats_current, cav_stats_current), dim=1)
-        ego2cav_relation_current = self.gat_CAV_1s(combined_ego2cav_current, self.adj_cav.to(combined_ego2cav_current.device))
+        # combined_ego2hdv_current = torch.cat((ego_stats_current, hdv_stats_current), dim=1)
+        # ego2hdv_relation_current = self.gat_HDV_1s(combined_ego2hdv_current, self.adj_hdv.to(combined_ego2hdv_current.device))
+        # combined_ego2cav_current = torch.cat((ego_stats_current, cav_stats_current), dim=1)
+        # ego2cav_relation_current = self.gat_CAV_1s(combined_ego2cav_current, self.adj_cav.to(combined_ego2cav_current.device))
         # combined_ego2cav_current_a = torch.cat((ego_motion_current, cav_motion_current), dim=1)
         # ego2cav_relation_current_a = self.gat_CAV_1a(combined_ego2cav_current_a, self.adj_cav.to(combined_ego2cav_current_a.device))
 
         # GAT feature
-        hdv_relation = ego2hdv_relation_current
-        cav_relation = ego2cav_relation_current
+        hdv_relation = ego2hdv_relation_hist
+        cav_relation = ego2cav_relation_hist
         ego_feature = hist_ego_feature
 
         # hist_hdv_enc = self.leaky_relu(self.input_embedding(hist_hdv_relation))
