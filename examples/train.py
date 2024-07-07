@@ -5,24 +5,13 @@ from harl.utils.configs_tools import get_defaults_yaml_args, update_args
 
 """
 copy-paste 
-
-# my own experiment
---algo
-mappo
---env
-metadrive
---exp_name
-IPPO_for_curve_map_single
-
 # referred experiment
---load_config 
-/home/tsaisplus/MARL/HARL/tuned_configs/pettingzoo_mpe/simple_reference_v2-discrete/mappo/config.json
-
+--load_config xxx.json
 """
 
 """
 --algo <ALGO> --env <ENV> --exp_name <EXPERIMENT NAME>
---algo mappo --env bottleneck --exp_name 0601_test
+--algo mappo --env bottleneck --exp_name 0624_improve_test
 or
 --load_config <TUNED CONFIG PATH> --exp_name <EXPERIMENT NAME>
 """

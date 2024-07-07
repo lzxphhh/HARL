@@ -9,12 +9,13 @@ use_gui: False
 # for veh wrapper
 scene_name: "Env_Bottleneck"
 max_num_CAVs: 16
+max_num_HDVs: 24
 num_CAVs: 6  # num_CAVs/penetration_CAV should be an integer multiple of 10, except for penetration_CAV=1
 num_HDVs: 9
 penetration_CAV: 0.4 # only 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1 are valid
-strategy: "base"  # "base" or "attention" or "hierarchical" or "other"
+strategy: "cross_aware"  # "base" or "attention" or "hierarchical" or "prediction" or "cross_aware"
 use_hist_info: True
-hist_length: 4
+hist_length: 5
 warmup_steps: 0
 edge_ids: [ 'E0', 'E1', 'E2', 'E3', 'E4', ]
 edge_lane_num: { 'E0': 4,
@@ -46,4 +47,4 @@ normal: 0.6
 # 5_0.5: 0.1 + 40
 # sum:10-44, 15-52, 20-58, 25-63, 30-70, 40-82
 save_collision: 0.2
-save_episode_step: 50
+save_episode_step: 52

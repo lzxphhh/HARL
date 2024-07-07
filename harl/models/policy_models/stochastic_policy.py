@@ -5,6 +5,8 @@ from harl.models.base.cnn import CNNBase
 from harl.models.base.mlp import MLPBase
 from harl.models.base.self_attention_multi_head import Encoder  # multi head self attention
 from harl.models.base.hierarchical_state_rep import Hierarchical_state_rep
+from harl.models.base.prediction_rep import Prediction_rep
+from harl.models.base.cross_aware_rep import Cross_aware_rep
 from harl.models.base.rnn import RNNLayer
 from harl.models.base.act import ACTLayer
 from harl.utils.envs_tools import get_shape_from_obs_space
@@ -49,6 +51,8 @@ class StochasticPolicy(nn.Module):
         self.base = base(args, obs_shape)
         self.attention = Encoder(obs_shape[0], action_space.n, 1, self.hidden_sizes[-1], 4, 'Discrete')
         self.hierarchical = Hierarchical_state_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
+        self.prediction = Prediction_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
+        self.cross_aware = Cross_aware_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
 
         # 如果使用RNN，初始化RNN层 #TODO: 暂时还没看
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
@@ -100,6 +104,10 @@ class StochasticPolicy(nn.Module):
             actor_features = self.attention(obs)
         elif self.strategy == 'hierarchical':
             actor_features = self.hierarchical(obs, batch_size=obs.size(0))
+        elif self.strategy == 'prediction':
+            actor_features = self.prediction(obs, batch_size=obs.size(0))
+        elif self.strategy == 'cross_aware':
+            actor_features = self.cross_aware(obs, batch_size=obs.size(0))
 
         # 如果使用RNN，将特征和RNN状态输入RNN层，得到新的特征和RNN状态
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
@@ -149,6 +157,10 @@ class StochasticPolicy(nn.Module):
             actor_features = self.attention(obs)
         elif self.strategy == 'hierarchical':
             actor_features = self.hierarchical(obs, batch_size=obs.size(0))
+        elif self.strategy == 'prediction':
+            actor_features = self.prediction(obs, batch_size=obs.size(0))
+        elif self.strategy == 'cross_aware':
+            actor_features = self.cross_aware(obs, batch_size=obs.size(0))
 
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)

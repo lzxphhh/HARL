@@ -99,7 +99,7 @@ class OnPolicyBaseRunner:
             )
         # 默认使用EP作为state_type
         # EP：EnvironmentProvided global state (EP)：环境提供的全局状态
-        # FP：Featured-Pruned Agent-Specific Global State (FP)： 特征裁剪的特定智能体全局状态
+        # FP：Featured-Pruned Agent-Specific Global State (FP)： 特征裁剪的特定智能体全局状态(不同agent的全局状态不同, 需要agent number)
         self.state_type = env_args.get("state_type", "EP")
         # TODO： EP or FP need to be added to customized env
 
@@ -129,12 +129,12 @@ class OnPolicyBaseRunner:
             for agent_id in range(1, self.num_agents):
                 # 所以self.envs.observation_space作为a list of obs space for each agent应该保持一致
                 assert (
-                        self.envs.observation_space[agent_id]
-                        == self.envs.observation_space[0]
+                    self.envs.observation_space[agent_id]
+                    == self.envs.observation_space[0]
                 ), "Agents have heterogeneous observation spaces, parameter sharing is not valid."
                 # 所以self.envs.action_space list of act space for each agent应该保持一致
                 assert (
-                        self.envs.action_space[agent_id] == self.envs.action_space[0]
+                    self.envs.action_space[agent_id] == self.envs.action_space[0]
                 ), "Agents have heterogeneous action spaces, parameter sharing is not valid."
                 self.actor.append(self.actor[0])
                 # self.actor是一个list，里面有N个一模一样的actor，
@@ -159,8 +159,10 @@ class OnPolicyBaseRunner:
             # 给每一个agent创立buffer，初始化buffer，进入OnPolicyActorBuffer
             for agent_id in range(self.num_agents):
                 ac_bu = OnPolicyActorBuffer(
-                    {**algo_args["train"], **algo_args["model"]},  # yaml里model和algo的config打包作为args进入OnPolicyActorBuffer
-                    self.envs.observation_space[agent_id],  # 【根据其不同的obs_dim和act_dim】
+                    # yaml里model和algo的config打包作为args进入OnPolicyActorBuffer
+                    {**algo_args["train"], **algo_args["model"]},
+                    # 【根据其不同的obs_dim和act_dim】
+                    self.envs.observation_space[agent_id],
                     self.envs.action_space[agent_id],
                 )
                 # self.actor_buffer列表中有N个buffer，所有agent每人一套buffer
@@ -171,8 +173,10 @@ class OnPolicyBaseRunner:
 
             # 创建centralized critic网络
             self.critic = VCritic(
-                {**algo_args["model"], **algo_args["algo"]},  # yaml里model和algo的config打包作为args进入VCritic
-                share_observation_space,  # 中心式的值函数centralized critic的输入是单个agent拿到的share_observation_space dim
+                # yaml里model和algo的config打包作为args进入VCritic
+                {**algo_args["model"], **algo_args["algo"]},
+                # 中心式的值函数centralized critic的输入是单个agent拿到的share_observation_space dim
+                share_observation_space,
                 device=self.device,
             )
 
@@ -231,9 +235,10 @@ class OnPolicyBaseRunner:
 
         # 计算总共需要跑多少个episode = 总训练时间步数 / 每个episode的时间步数 / 并行的环境数 (int)
         episodes = (
-                int(self.algo_args["train"]["num_env_steps"])  # 训练总时间步数
-                // self.algo_args["train"]["episode_length"]  # 每个episode的时间步数
-                // self.algo_args["train"]["n_rollout_threads"]  # 并行的环境数
+                # 训练总时间步数 / 每个episode的时间步数 / 并行的环境数
+                int(self.algo_args["train"]["num_env_steps"])
+                // self.algo_args["train"]["episode_length"]
+                // self.algo_args["train"]["n_rollout_threads"]
         )
 
         # 初始化logger
@@ -298,8 +303,13 @@ class OnPolicyBaseRunner:
                     infos,
                     available_actions,
                 ) = self.envs.step(actions)
-
                 """每个step更新logger里面的per_step data"""
+                # obs: (n_threads, n_agents, obs_dim)
+                # share_obs: (n_threads, n_agents, share_obs_dim)
+                # rewards: (n_threads, n_agents, 1)
+                # dones: (n_threads, n_agents)
+                # infos: (n_threads)
+                # available_actions: (n_threads, ) of None or (n_threads, n_agents, action_number)
                 data = (
                     obs,
                     share_obs,
@@ -313,6 +323,7 @@ class OnPolicyBaseRunner:
                     rnn_states,
                     rnn_states_critic,
                 )
+
                 self.logger.per_step(data)  # logger callback at each step
 
                 """把这一步的数据存入每一个actor的replay buffer 以及 集中式critic的replay buffer"""
@@ -331,12 +342,18 @@ class OnPolicyBaseRunner:
 
             # log information
             if episode % self.algo_args["train"]["log_interval"] == 0:
-                self.logger.episode_log(
-                    actor_train_infos,
-                    critic_train_info,
-                    self.actor_buffer,
-                    self.critic_buffer,
-                )
+                save_model_signal, current_timestep = self.logger.episode_log(
+                                    actor_train_infos,
+                                    critic_train_info,
+                                    self.actor_buffer,
+                                    self.critic_buffer,
+                                    self.env_args["save_collision"],
+                                    self.env_args["save_episode_step"],
+                                )
+                if save_model_signal:
+                    self.save_good_model(current_timestep)
+                else:
+                    pass
 
             # eval
             if episode % self.algo_args["train"]["eval_interval"] == 0:
@@ -509,24 +526,36 @@ class OnPolicyBaseRunner:
         rnn_states: (n_threads, n_agents, rnn层数, hidden_dim)
         rnn_states_critic: (n_threads, rnn层数, hidden_dim)
         """
-        # if env is done, then reset rnn_state to all zero
         # 如果哪个env done了，那么就把那个环境的rnn_state (所有actor)置为0
-        rnn_states[dones_env == True] = np.zeros(((dones_env == True).sum(), #dones_env里有几个true，几个并行环境done了
-                                                  self.num_agents,
-                                                  self.recurrent_n,
-                                                  self.rnn_hidden_size,), dtype=np.float32, )
+        rnn_states[
+            dones_env == True
+        ] = np.zeros(  # if env is done, then reset rnn_state to all zero
+            (
+                (dones_env == True).sum(), #dones_env里有几个true，几个并行环境done了
+                self.num_agents,
+                self.recurrent_n,
+                self.rnn_hidden_size,
+            ),
+            dtype=np.float32,
+        )
 
         # If env is done, then reset rnn_state_critic to all zero
         # 如果哪个env done了，那么就把那个环境的rnn_state (critic)置为0
         if self.state_type == "EP":
-            rnn_states_critic[dones_env == True] = np.zeros(((dones_env == True).sum(), #dones_env里有几个true，几个并行环境done了
-                                                             self.recurrent_n,
-                                                             self.rnn_hidden_size),dtype=np.float32,)
+            rnn_states_critic[dones_env == True] = np.zeros(
+                ((dones_env == True).sum(), self.recurrent_n, self.rnn_hidden_size),
+                dtype=np.float32,
+            )
         elif self.state_type == "FP":
-            rnn_states_critic[dones_env == True] = np.zeros(((dones_env == True).sum(),
-                                                             self.num_agents,
-                                                             self.recurrent_n,
-                                                             self.rnn_hidden_size,), dtype=np.float32, )
+            rnn_states_critic[dones_env == True] = np.zeros(
+                (
+                    (dones_env == True).sum(),
+                    self.num_agents,
+                    self.recurrent_n,
+                    self.rnn_hidden_size,
+                ),
+                dtype=np.float32,
+            )
 
         """
         重置masks
@@ -537,13 +566,14 @@ class OnPolicyBaseRunner:
         array of shape (n_rollout_threads, n_agents, 1)
         """
         # 初始化所有环境的mask是1
-        masks = np.ones((self.algo_args["train"]["n_rollout_threads"],
-                         self.num_agents,
-                         1), dtype=np.float32,)
+        masks = np.ones(
+            (self.algo_args["train"]["n_rollout_threads"], self.num_agents, 1),
+            dtype=np.float32,
+        )
         # 如果哪个env done了，那么就把那个环境的mask置为0
-        masks[dones_env == True] = np.zeros(((dones_env == True).sum(),  # 几个并行环境done了
-                                             self.num_agents,
-                                             1), dtype=np.float32)
+        masks[dones_env == True] = np.zeros(
+            ((dones_env == True).sum(), self.num_agents, 1), dtype=np.float32
+        )
         """
         重置active_masks
         把已经死掉的agent的mask由1置为0
@@ -551,16 +581,18 @@ class OnPolicyBaseRunner:
         array of shape (n_rollout_threads, n_agents, 1)
         """
         # 初始化所有环境的mask是1
-        active_masks = np.ones((self.algo_args["train"]["n_rollout_threads"],
-                                self.num_agents,
-                                1), dtype=np.float32,)
+        active_masks = np.ones(
+            (self.algo_args["train"]["n_rollout_threads"], self.num_agents, 1),
+            dtype=np.float32,
+        )
         # 如果哪个agent done了，那么就把那个agent的mask置为0
-        active_masks[dones == True] = np.zeros(((dones == True).sum(),
-                                                1), dtype=np.float32)
+        active_masks[dones == True] = np.zeros(
+            ((dones == True).sum(), 1), dtype=np.float32
+        )
         # 如果哪个env done了，那么就把那个环境的mask置为1
-        active_masks[dones_env == True] = np.ones(((dones_env == True).sum(),
-                                                   self.num_agents,
-                                                   1), dtype=np.float32)
+        active_masks[dones_env == True] = np.ones(
+            ((dones_env == True).sum(), self.num_agents, 1), dtype=np.float32
+        )
 
         """
         重置bad_masks
@@ -572,7 +604,7 @@ class OnPolicyBaseRunner:
                 [
                     [0.0]
                     if "bad_transition" in info[0].keys()
-                       and info[0]["bad_transition"] == True
+                    and info[0]["bad_transition"] == True
                     else [1.0]
                     for info in infos
                 ]
@@ -583,7 +615,7 @@ class OnPolicyBaseRunner:
                     [
                         [0.0]
                         if "bad_transition" in info[agent_id].keys()
-                           and info[agent_id]["bad_transition"] == True
+                        and info[agent_id]["bad_transition"] == True
                         else [1.0]
                         for agent_id in range(self.num_agents)
                     ]
@@ -731,7 +763,7 @@ class OnPolicyBaseRunner:
 
             eval_rnn_states[
                 eval_dones_env == True
-                ] = np.zeros(  # if env is done, then reset rnn_state to all zero
+            ] = np.zeros(  # if env is done, then reset rnn_state to all zero
                 (
                     (eval_dones_env == True).sum(),
                     self.num_agents,
@@ -809,9 +841,11 @@ class OnPolicyBaseRunner:
                         _,
                         eval_rewards,
                         eval_dones,
-                        _,
+                        infos,
                         eval_available_actions,
                     ) = self.envs.step(eval_actions[0])
+                    # print('Reward for each CAV:', eval_rewards)
+                    # print()
                     rewards += eval_rewards[0][0]
                     eval_obs = np.expand_dims(np.array(eval_obs), axis=0)
                     eval_available_actions = (
@@ -823,8 +857,12 @@ class OnPolicyBaseRunner:
                         self.envs.render()
                     if self.manual_delay:
                         time.sleep(0.1)
-                    if eval_dones[0]:
+                    if np.all(eval_dones):
                         print(f"total reward of this episode: {rewards}")
+                        print(f"Episode Step Time: {infos[0]['step_time']}")
+                        print(f"Collision: {infos[0]['collision']}")
+                        print(f"Done Reason: {infos[0]['done_reason']}")
+                        print('--------------------------------------')
                         break
         else:
             # this env does not need manual expansion of the num_of_parallel_envs dimension
@@ -921,17 +959,47 @@ class OnPolicyBaseRunner:
                 self.value_normalizer.state_dict(),
                 str(self.save_dir) + "/value_normalizer" + ".pt",
             )
+    def save_good_model(self, current_timestep):
+        """Save Model when the model is good."""
+
+        policy_actor = self.actor[0].actor
+        save_good_dir = self.save_dir + "/good_model"
+        if not os.path.exists(save_good_dir):
+            os.mkdir(save_good_dir)
+        torch.save(
+            policy_actor.state_dict(),
+            save_good_dir + "/actor_agent" + str(0) + "_" + str(current_timestep) + ".pt",
+        )
+        policy_critic = self.critic.critic
+        torch.save(
+            policy_critic.state_dict(), save_good_dir + "/critic_agent" + "_" + str(current_timestep) +  ".pt"
+        )
+        if self.value_normalizer is not None:
+            torch.save(
+                self.value_normalizer.state_dict(),
+                save_good_dir + "/value_normalizer" + "_" + str(current_timestep) + ".pt",
+            )
 
     def restore(self):
         """Restore model parameters."""
-        for agent_id in range(self.num_agents):
-            policy_actor_state_dict = torch.load(
-                str(self.algo_args["train"]["model_dir"])
-                + "/actor_agent"
-                + str(agent_id)
-                + ".pt"
-            )
-            self.actor[agent_id].actor.load_state_dict(policy_actor_state_dict)
+        if self.share_param:
+            for agent_id in range(self.num_agents):
+                policy_actor_state_dict = torch.load(
+                    str(self.algo_args["train"]["model_dir"])
+                    + "/actor_agent"
+                    + '0'
+                    + ".pt"
+                )
+                self.actor[agent_id].actor.load_state_dict(policy_actor_state_dict)
+        else:
+            for agent_id in range(self.num_agents):
+                policy_actor_state_dict = torch.load(
+                    str(self.algo_args["train"]["model_dir"])
+                    + "/actor_agent"
+                    + str(agent_id)
+                    + ".pt"
+                )
+                self.actor[agent_id].actor.load_state_dict(policy_actor_state_dict)
         if not self.algo_args["render"]["use_render"]:
             policy_critic_state_dict = torch.load(
                 str(self.algo_args["train"]["model_dir"]) + "/critic_agent" + ".pt"

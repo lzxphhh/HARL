@@ -52,6 +52,7 @@ class VehEnvWrapper(gym.Wrapper):
     def __init__(self, env: Env,
                  name_scenario: str,  # 场景的名称
                  max_num_CAVs: int,  # 最大的 CAV 数量
+                 max_num_HDVs: int,  # 最大的 HDV 数量
                  CAV_penetration: float,  # HDV 的数量
                  num_CAVs: int,  # CAV 的数量
                  num_HDVs: int,  # HDV 的数量
@@ -74,6 +75,7 @@ class VehEnvWrapper(gym.Wrapper):
         super().__init__(env)
         self.name_scenario = name_scenario
         self.max_num_CAVs = max_num_CAVs
+        self.max_num_HDVs = max_num_HDVs
         self.CAV_penetration = CAV_penetration
         self.num_CAVs = num_CAVs
         self.num_HDVs = num_HDVs
@@ -128,10 +130,10 @@ class VehEnvWrapper(gym.Wrapper):
         #     header={"t_start": self.t_start},
         # )
         self.rewards_writer = list()
-        # all hdv + all cav + all lanes + bottleneck + road structure + self stats + surround hdv + surround cav + surround lanes
-        hier_obs_size = num_HDVs*13 + num_CAVs*13 + 18*6 + 2 + 10 + 13 + 4*6 + 4*6 + 3*6
-        # road structure + self stats + surround vehs + surround lanes
-        # base_obs_size = 10 + 13 + 3*6 + 3*6
+        # global part: road structure(10) + bottleneck(2) + all CAVs(max*6) + all HDVs(max*6) + all lanes(18*6)
+        # individual part: target(2) + self stats(13) + action(3) + surround CAVs(6*6) + surround HDVs(6*6) + surround lanes(3*6)
+        hier_obs_size = 10 + 2 + 2 + self.max_num_CAVs*6 + self.max_num_HDVs*6 + 18*6 \
+                        + 2 + 4 + 13 + 6*6 + 6*6 + 3*6 +3
         # FP-target position（根据当前位置、静态地图、车道特征筛选） + self stats + surround vehs
         base_obs_size = 2 + 3 + 3 * 6
         if self.strategy == 'hierarchical':
@@ -140,22 +142,24 @@ class VehEnvWrapper(gym.Wrapper):
             self.self_obs_size = base_obs_size
         elif self.strategy == 'attention':
             self.self_obs_size = hier_obs_size
+        elif self.strategy == 'prediction':
+            self.self_obs_size = hier_obs_size
+        elif self.strategy == 'cross_aware':
+            self.self_obs_size = hier_obs_size
         self.hist_info = {}
-        # FP-road structure + self stats + surround vehs + all lanes
-        # self.shared_obs_size = 10 + 13 + 3 * 6 + 18 * 6
-        # FP-road structure + self stats + surround vehs + surround lanes
-        # self.shared_obs_size = self.self_obs_size
-        # FP-target position（根据当前位置、静态地图、车道特征筛选） + self stats + surround vehs
-        # self.shared_obs_size = 2 + 3 + 3 * 6
-        # FP-road structure + self stats + surround vehs + all cavs + all lanes
-        self.shared_obs_size = 2 + 3 + 3 * 6 + 3 * self.max_num_CAVs + 18 * 3
-        # EP-road structure + cav stats + all lanes
-        # self.shared_obs_size = 10 + 3 * self.max_num_CAVs + 18 * 6
+        self.action_generation = {}
+        self.action_execution = {}
+        # FP-global part: road structure(10) +all CAVs(max*6) + all HDVs(max*6) + all lanes(18*6)
+        # FP-individual part: target(2) + self stats(13) + surround vehs(6*3)
+        # self.shared_obs_size = 10 + 2 + 2 + self.max_num_CAVs*6 + self.max_num_HDVs*6 + 18*6  # EP mode
+                               # + 2 + 13 + 6*3
+        self.shared_obs_size = hier_obs_size  # FP mode
         if self.use_hist_info:
             self.obs_size = self.self_obs_size * (self.hist_length+1)
-            # self.obs_size = self.self_obs_size
             for i in range(self.hist_length):
                 self.hist_info[f'hist_{i+1}'] = {ego_id: np.zeros(self.self_obs_size) for ego_id in self.ego_ids}
+                self.action_generation[f'hist_{i+1}'] = {ego_id: 0 for ego_id in self.ego_ids}
+                self.action_execution[f'hist_{i+1}'] = {ego_id: (0, 0.0) for ego_id in self.ego_ids}
         else:
             self.obs_size = self.self_obs_size
 
@@ -540,7 +544,7 @@ class VehEnvWrapper(gym.Wrapper):
                 bottle_neck_positions=self.bottle_neck_positions,
                 ego_ids=self.ego_ids,
             )
-        elif self.strategy == 'hierarchical':
+        elif self.strategy == 'hierarchical' or self.strategy == 'prediction' or self.strategy == 'cross_aware':
             feature_vectors_current, feature_vectors_current_flatten, feature_vectors, feature_vectors_flatten = compute_hierarchical_ego_vehicle_features(
                 self,
                 hdv_statistics=hdv_statistics,
@@ -658,7 +662,7 @@ class VehEnvWrapper(gym.Wrapper):
                 # inidividual_rew_ego[veh_id] += 1 * individual_speed_r
 
                 # CAV车辆的target速度越靠近最大速度，reward越高 - [0, 5]
-                individual_speed_r_simple = (-abs(speed - max_speed) / max_speed * 5 + 5) * 2
+                individual_speed_r_simple = (-abs(speed - max_speed) / max_speed * 5 + 5) * 1
                 inidividual_rew_ego[veh_id] += individual_speed_r_simple
 
                 # # CAV车辆的等待时间越短，reward越高 - (-infty,0]
@@ -678,14 +682,14 @@ class VehEnvWrapper(gym.Wrapper):
                         # CAV车辆的警告距离越远，reward越高 - [0, 5]
                         individual_warn_r += -(WARN_GAP_THRESHOLD - dis) / (
                                 WARN_GAP_THRESHOLD - GAP_THRESHOLD) * 10  # [-10, 0]
-                    inidividual_rew_ego[veh_id] += individual_warn_r * 0.25
+                    inidividual_rew_ego[veh_id] += individual_warn_r * 0.05
 
                 if veh_id in self.coll_ego_ids.keys():
                     individual_coll_r = 0
                     for dis in self.coll_ego_ids[veh_id]:
                         # CAV车辆的碰撞距离越远，reward越高 - [0, 5]
-                        individual_coll_r += -(GAP_THRESHOLD - dis) / GAP_THRESHOLD * 20 - 10  # [-30, -10]
-                    inidividual_rew_ego[veh_id] += individual_coll_r * 0.25
+                        individual_coll_r += -(GAP_THRESHOLD - dis) / GAP_THRESHOLD * 40 - 10  # [-30, -10]
+                    inidividual_rew_ego[veh_id] += individual_coll_r * 0.05
 
                 # 计算局部地区的reward
                 if road_id in self.bottle_necks + ['E3', 'E2', 'E1', 'E0']:
@@ -696,49 +700,47 @@ class VehEnvWrapper(gym.Wrapper):
                     range_reward_ego[veh_id] = 0
 
                 if road_id in self.bottle_necks+['E2']:
-                    time_penalty_ego[veh_id] = -15
                     is_in_bottleneck[veh_id] = 1
                 else:
-                    time_penalty_ego[veh_id] = -15
                     is_in_bottleneck[veh_id] = 0
 
                 if inidividual_rew_ego[veh_id] == individual_speed_r_simple:
-                    time_penalty_ego[veh_id] = 40 * (1 / (1 + np.exp(0-speed)) - 1)
+                    time_penalty_ego[veh_id] = ((self.num_CAVs-1)+self.CAV_penetration) * 10 * (1 / (1 + np.exp(5-speed)) - 1)
                     # time_penalty_ego[veh_id] = 100 * (math.tanh(speed) - 1)
                 else:
                     time_penalty_ego[veh_id] = 0
 
         # 计算全局reward
         all_ego_vehicle_speed = np.mean(all_ego_vehicle_speed)  # CAV车辆的平均速度 - 使用target speed
-        all_ego_mean_speed = np.mean(all_ego_vehicle_mean_speed)  # CAV车辆的累积平均速度 - 使用速度/时间
-        all_ego_vehicle_accumulated_waiting_time = np.mean(all_ego_vehicle_accumulated_waiting_time)  # CAV车辆的累积平均等待时间
-        all_ego_vehicle_waiting_time = np.mean(all_ego_vehicle_waiting_time)  # CAV车辆的mean等待时间
-        all_ego_vehicle_position_x = np.mean(all_ego_vehicle_position_x)  # CAV车辆的位置
+        # all_ego_mean_speed = np.mean(all_ego_vehicle_mean_speed)  # CAV车辆的累积平均速度 - 使用速度/时间
+        # all_ego_vehicle_accumulated_waiting_time = np.mean(all_ego_vehicle_accumulated_waiting_time)  # CAV车辆的累积平均等待时间
+        # all_ego_vehicle_waiting_time = np.mean(all_ego_vehicle_waiting_time)  # CAV车辆的mean等待时间
+        # all_ego_vehicle_position_x = np.mean(all_ego_vehicle_position_x)  # CAV车辆的位置
 
-        all_vehicle_speed = np.mean(all_vehicle_speed)  # CAV和HDV车辆的平均速度 - 使用target speed
-        all_vehicle_mean_speed = np.mean(all_vehicle_mean_speed)  # CAV和HDV车辆的累积平均速度 - 使用速度/时间
-        all_vehicle_accumulated_waiting_time = np.mean(all_vehicle_accumulated_waiting_time)  # CAV和HDV车辆的累积平均等待时间
-        all_vehicle_waiting_time = np.mean(all_vehicle_waiting_time)  # CAV和HDV车辆的mean等待时间
-        all_vehicle_position_x = np.mean(all_vehicle_position_x)  # CAV和HDV车辆的位置
+        # all_vehicle_speed = np.mean(all_vehicle_speed)  # CAV和HDV车辆的平均速度 - 使用target speed
+        # all_vehicle_mean_speed = np.mean(all_vehicle_mean_speed)  # CAV和HDV车辆的累积平均速度 - 使用速度/时间
+        # all_vehicle_accumulated_waiting_time = np.mean(all_vehicle_accumulated_waiting_time)  # CAV和HDV车辆的累积平均等待时间
+        # all_vehicle_waiting_time = np.mean(all_vehicle_waiting_time)  # CAV和HDV车辆的mean等待时间
+        # all_vehicle_position_x = np.mean(all_vehicle_position_x)  # CAV和HDV车辆的位置
 
         global_ego_speed_r = -abs(all_ego_vehicle_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
-        global_ego_mean_speed_r = -abs(all_ego_mean_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
-        global_ego_accumulated_waiting_time_r = -all_ego_vehicle_accumulated_waiting_time   # (-infty,0]
-        global_ego_waiting_time_r = -all_ego_vehicle_waiting_time   # (-infty,0]
-        global_ego_position_x_r = all_ego_vehicle_position_x / self.bottle_neck_positions[0]
+        # global_ego_mean_speed_r = -abs(all_ego_mean_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
+        # global_ego_accumulated_waiting_time_r = -all_ego_vehicle_accumulated_waiting_time   # (-infty,0]
+        # global_ego_waiting_time_r = -all_ego_vehicle_waiting_time   # (-infty,0]
+        # global_ego_position_x_r = all_ego_vehicle_position_x / self.bottle_neck_positions[0]
 
-        global_all_speed_r = -abs(all_vehicle_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
-        global_all_mean_speed_r = -abs(all_vehicle_mean_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
-        global_all_accumulated_waiting_time_r = -all_vehicle_accumulated_waiting_time   # [0, 5]
-        global_all_waiting_time_r = -all_vehicle_waiting_time   # (-infty,0]
-        global_all_position_x_r = all_vehicle_position_x / self.bottle_neck_positions[0]
+        # global_all_speed_r = -abs(all_vehicle_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
+        # global_all_mean_speed_r = -abs(all_vehicle_mean_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
+        # global_all_accumulated_waiting_time_r = -all_vehicle_accumulated_waiting_time   # [0, 5]
+        # global_all_waiting_time_r = -all_vehicle_waiting_time   # (-infty,0]
+        # global_all_position_x_r = all_vehicle_position_x / self.bottle_neck_positions[0]
 
         range_vehicle_speed = np.mean(range_vehicle_speed) if range_vehicle_speed != [] else 0  # bottleneck+ 区域的车辆的速度
-        range_vehicle_waiting_time = np.mean(range_vehicle_waiting_time) if range_vehicle_waiting_time != [] else 0  # bottleneck+ 区域的车辆的等待时间
-        range_vehicle_accumulated_waiting_time = np.mean(range_vehicle_accumulated_waiting_time) if range_vehicle_accumulated_waiting_time != [] else 0  # bottleneck+ 区域的车辆的累积等待时间
-        range_ego_vehicle_speed = np.mean(range_ego_vehicle_speed) if range_ego_vehicle_speed != [] else 0  # bottleneck+ 区域的CAV车辆的速度
-        range_ego_vehicle_waiting_time = np.mean(range_ego_vehicle_waiting_time) if range_ego_vehicle_waiting_time != [] else 0  # bottleneck+ 区域的CAV车辆的等待时间
-        range_ego_vehicle_accumulated_waiting_time = np.mean(range_ego_vehicle_accumulated_waiting_time) if range_ego_vehicle_accumulated_waiting_time != [] else 0
+        # range_vehicle_waiting_time = np.mean(range_vehicle_waiting_time) if range_vehicle_waiting_time != [] else 0  # bottleneck+ 区域的车辆的等待时间
+        # range_vehicle_accumulated_waiting_time = np.mean(range_vehicle_accumulated_waiting_time) if range_vehicle_accumulated_waiting_time != [] else 0  # bottleneck+ 区域的车辆的累积等待时间
+        # range_ego_vehicle_speed = np.mean(range_ego_vehicle_speed) if range_ego_vehicle_speed != [] else 0  # bottleneck+ 区域的CAV车辆的速度
+        # range_ego_vehicle_waiting_time = np.mean(range_ego_vehicle_waiting_time) if range_ego_vehicle_waiting_time != [] else 0  # bottleneck+ 区域的CAV车辆的等待时间
+        # range_ego_vehicle_accumulated_waiting_time = np.mean(range_ego_vehicle_accumulated_waiting_time) if range_ego_vehicle_accumulated_waiting_time != [] else 0
 
         for veh_id in inidividual_rew_ego.keys():
             if veh_id not in self.vehicles_info.keys():
@@ -746,18 +748,18 @@ class VehEnvWrapper(gym.Wrapper):
             road_id = self.vehicles_info[veh_id][1]
             if road_id in self.bottle_necks + ['E2', 'E3']:
                 range_vehs_speed_r = -abs(range_vehicle_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
-                range_vehs_waiting_time_r = -range_vehicle_waiting_time  # (-infty,0]
-                range_vehs_accumulated_waiting_time_r = -range_vehicle_accumulated_waiting_time  # (-infty,0]
-                range_ego_speed_r = -abs(range_ego_vehicle_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
-                range_ego_waiting_time_r = -range_ego_vehicle_waiting_time  # (-infty,0]
-                range_ego_accumulated_waiting_time_r = -range_ego_vehicle_accumulated_waiting_time  # (-infty,0]
+                # range_vehs_waiting_time_r = -range_vehicle_waiting_time  # (-infty,0]
+                # range_vehs_accumulated_waiting_time_r = -range_vehicle_accumulated_waiting_time  # (-infty,0]
+                # range_ego_speed_r = -abs(range_ego_vehicle_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
+                # range_ego_waiting_time_r = -range_ego_vehicle_waiting_time  # (-infty,0]
+                # range_ego_accumulated_waiting_time_r = -range_ego_vehicle_accumulated_waiting_time  # (-infty,0]
             else:
                 range_vehs_speed_r = 0
-                range_vehs_waiting_time_r = 0
-                range_vehs_accumulated_waiting_time_r = 0
-                range_ego_speed_r = 0
-                range_ego_waiting_time_r = 0
-                range_ego_accumulated_waiting_time_r = 0
+                # range_vehs_waiting_time_r = 0
+                # range_vehs_accumulated_waiting_time_r = 0
+                # range_ego_speed_r = 0
+                # range_ego_waiting_time_r = 0
+                # range_ego_accumulated_waiting_time_r = 0
             bottleneck_reward_ego[veh_id] += range_vehs_speed_r
                                             # + range_ego_speed_r
                                             # + range_ego_waiting_time_r \
@@ -776,11 +778,11 @@ class VehEnvWrapper(gym.Wrapper):
         # rewards = {key: inidividual_rew_ego[key] + range_reward_ego[key] + global_speed_r + global_waiting_time_r + \
         #               global_ego_speed_r + global_ego_waiting_time_r for key in inidividual_rew_ego}
 
-        rewards = {key: inidividual_rew_ego[key] \
+        rewards = {key: (1-self.CAV_penetration) * inidividual_rew_ego[key] \
                         # + range_reward_ego[key] \
                         # + is_in_bottleneck[key] * bottleneck_reward_ego[key] \
-                        # + time_penalty_ego[key] \
-                        + global_ego_speed_r \
+                        + time_penalty_ego[key] \
+                        + self.CAV_penetration * global_ego_speed_r \
                         # + global_ego_mean_speed_r \
                         # + global_ego_waiting_time_r \
                         # + global_ego_accumulated_waiting_time_r \
@@ -933,9 +935,22 @@ class VehEnvWrapper(gym.Wrapper):
         for ego_id, ego_live in self.agent_mask.items():
             if not ego_live:
                 del action[ego_id]
+            else:
+                if self.use_hist_info:
+                    for i in range(self.hist_length-1):
+                        self.action_generation[f'hist_{self.hist_length - i}'][ego_id] = \
+                        self.action_generation[f'hist_{self.hist_length - i - 1}'][ego_id]
+                    self.action_generation['hist_1'][ego_id] = action[ego_id]
 
         # 更新 action
         action = self.__update_actions(raw_action=action).copy()
+        for ego_id, ego_live in self.agent_mask.items():
+            if ego_live:
+                if self.use_hist_info:
+                    for i in range(self.hist_length-1):
+                        self.action_execution[f'hist_{self.hist_length - i}'][ego_id] = \
+                        self.action_execution[f'hist_{self.hist_length - i - 1}'][ego_id]
+                    self.action_execution['hist_1'][ego_id] = action[ego_id]
         # 在环境里走一步
         init_state, rewards, truncated, _dones, infos = super().step(action)
         init_state = self.append_surrounding(init_state)

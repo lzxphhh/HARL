@@ -671,8 +671,9 @@ def compute_base_ego_vehicle_features(
         FP_Target_shared_feature_vectors[ego_id]['target'] = veh_target[ego_id]
         FP_Target_shared_feature_vectors[ego_id]['self_stats'] = ego_stats[ego_id][:3]
         FP_Target_shared_feature_vectors[ego_id]['surround_vehs_stats'] = flat_surround_vehs[ego_id]
+        FP_Target_shared_feature_vectors[ego_id]['road_structure'] = feature_vector['road_structure']
         FP_Target_shared_feature_vectors[ego_id]['cav_stats'] = global_cav
-        FP_Target_shared_feature_vectors[ego_id]['all_lane_stats'] = all_lane_state_simple
+        # FP_Target_shared_feature_vectors[ego_id]['all_lane_stats'] = all_lane_state_simple
 
     global_feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in global_feature_vectors.items()}
 
@@ -714,6 +715,7 @@ def compute_base_ego_vehicle_features(
     # return global_feature_vectors, global_feature_vectors_flatten, feature_vectors, feature_vectors_flatten
     # return feature_vectors_current, feature_vectors_current_flatten, feature_vectors, feature_vectors_flatten
     # return shared_feature_vectors_current, shared_feature_flatten, feature_vectors, feature_vectors_flatten
+
 def compute_hierarchical_ego_vehicle_features(
         self,
         hdv_statistics: Dict[str, List[Union[float, str, Tuple[int]]]],
@@ -760,18 +762,23 @@ def compute_hierarchical_ego_vehicle_features(
         # 如果车道数不足4个, 补0 对齐到最多数量的lane num
         if len(lane_index_one_hot) < 4:
             lane_index_one_hot += [0] * (4 - len(lane_index_one_hot))
-        hdv_stats[hdv_id] = [normalized_speed, normalized_position_x, normalized_position_y,
-                             normalized_heading] + road_id_one_hot + lane_index_one_hot
-    # convert to 2D array (12 * 13)  - 12 is max number of HDVs
+        hdv_stats[hdv_id] = [normalized_speed, normalized_position_x, normalized_position_y, -1, -1, -1]
+        # hdv_stats[hdv_id] = [normalized_speed, normalized_position_x, normalized_position_y,
+        #                      normalized_heading] + road_id_one_hot + lane_index_one_hot
+    # convert to 2D array (24 * 3)  - 24 is max number of HDVs
+    for i in range(self.max_num_HDVs):
+        if 'HDV_'+str(i) not in hdv_stats:
+            hdv_stats['HDV_'+str(i)] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     hdv_stats = np.array(list(hdv_stats.values()))
-    if 0 < hdv_stats.shape[0] <= self.num_HDVs:
-        # add 0 to make sure the shape is (12, 13)
-        hdv_stats = np.vstack([hdv_stats, np.zeros((self.num_HDVs - hdv_stats.shape[0], 13))])
+    if 0 < hdv_stats.shape[0] <= self.max_num_HDVs:
+        # add 0 to make sure the shape is (max_num_HDVs, 13)
+        hdv_stats = np.vstack([hdv_stats, np.zeros((self.max_num_HDVs - hdv_stats.shape[0], 6))])
     elif hdv_stats.shape[0] == 0:
-        hdv_stats = np.zeros((self.num_HDVs, 13))
+        hdv_stats = np.zeros((self.max_num_HDVs, 6))
     # ############################## 所有CAV的信息 ############################## 13
     cav_stats = {}
     ego_stats = {}
+    surround_vehs_stats = {key:[] for key in ego_ids}
     surround_hdv_stats = {key:[] for key in ego_ids}
     surround_cav_stats = {key:[] for key in ego_ids}
     for ego_id, ego_info in ego_statistics.items():
@@ -794,40 +801,36 @@ def compute_hierarchical_ego_vehicle_features(
             lane_index_one_hot += [0] * (4 - len(lane_index_one_hot))
         # ############################## 周车信息 ############################## 18
         # 提取surrounding的信息 -18
-        surround = []
-
         for index, (_, statistics) in enumerate(surroundings.items()):
             relat_x, relat_y, relat_v = statistics[1:4]
-            surround.append([int(statistics[0][4:]), relat_x, relat_y, relat_v])  # relat_x, relat_y, relat_v
+            surround_vehs_stats[ego_id].append([relat_x/700, relat_y, relat_v/15])  # relat_x, relat_y, relat_v
             if statistics[0][:3] == 'HDV':
-                surround_hdv_stats[ego_id].append([int(statistics[0][4:]), relat_x/700, relat_y, relat_v/15])
+                surround_hdv_stats[ego_id].append([relat_x/700, relat_y, relat_v/15, -1, -1, -1])
             elif statistics[0][:3] == 'CAV':
-                surround_cav_stats[ego_id].append([int(statistics[0][4:]), relat_x/700, relat_y, relat_v/15])
-        flat_surround = [item for sublist in surround for item in sublist]
-        # 如果周围车辆的信息不足6*3个, 补0 对齐到最多数量的周车信息
-        if len(flat_surround) < 4*6:
-            flat_surround += [0] * (4*6 - len(flat_surround))
+                surround_cav_stats[ego_id].append([relat_x/700, relat_y, relat_v/15, self.action_generation['hist_1'][statistics[0]], self.action_execution['hist_1'][statistics[0]][0], self.action_execution['hist_1'][statistics[0]][1]/15])
 
-        # cav_stats[ego_id] = [normalized_speed, normalized_position_x, normalized_position_y,
+        # cav_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed,
         #                      normalized_heading] + road_id_one_hot + lane_index_one_hot
-        # ego_stats[ego_id] = [normalized_speed, normalized_position_x, normalized_position_y,
+        # ego_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed,
         #                      normalized_heading] + road_id_one_hot + lane_index_one_hot
-        cav_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed,
-                             normalized_heading] + road_id_one_hot + lane_index_one_hot
+        cav_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed, self.action_generation['hist_1'][ego_id], self.action_execution['hist_1'][ego_id][0], self.action_execution['hist_1'][ego_id][1]/15]
         ego_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed,
                              normalized_heading] + road_id_one_hot + lane_index_one_hot
-    # convert to 2D array (5 * 5)
+    # convert to 2D array
+    for i in range(self.max_num_CAVs):
+        if 'CAV_'+str(i) not in cav_stats:
+            cav_stats['CAV_'+str(i)] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     cav_stats = np.array(list(cav_stats.values()))
-    if 0 < cav_stats.shape[0] <= self.num_CAVs:
+    if 0 < cav_stats.shape[0] <= self.max_num_CAVs:
         # add 0 to make sure the shape is (12, 13)
-        cav_stats = np.vstack([cav_stats, np.zeros((self.num_CAVs - cav_stats.shape[0], 13))])
+        cav_stats = np.vstack([cav_stats, np.zeros((self.max_num_CAVs - cav_stats.shape[0], 6))])
     elif cav_stats.shape[0] == 0:
-        cav_stats = np.zeros((self.num_CAVs, 13))
+        cav_stats = np.zeros((self.max_num_CAVs, 6))
 
     if len(ego_stats) != len(ego_ids):
         for ego_id in ego_ids:
             if ego_id not in ego_stats:
-                ego_stats[ego_id] = [0.0] * 13
+                ego_stats[ego_id] = [0.0] * 16
 
     # ############################## lane_statistics 的信息 ############################## 18
     # Initialize a list to hold all lane statistics
@@ -882,24 +885,36 @@ def compute_hierarchical_ego_vehicle_features(
     feature_vector['bottle_neck_position'] = np.array([bottle_neck_position_x, bottle_neck_position_y])
     feature_vector['road_structure'] = np.array([0, 0, bottle_neck_position_x, bottle_neck_position_y, 4,
                                                  bottle_neck_position_x, bottle_neck_position_y, 1, 0, 2])
+    feature_vector['road_end'] = np.array([1, 0])
 
+    veh_target = get_target(ego_statistics, lane_statistics)
     feature_vectors_current = {}
+    shared_feature_vectors = {}
     flat_surround_hdv = {key: [] for key in ego_ids}
     flat_surround_cav = {key: [] for key in ego_ids}
+    flat_surround_vehs = {key: [] for key in ego_ids}
     for ego_id in ego_statistics.keys():
         feature_vectors_current[ego_id] = feature_vector.copy()
+        feature_vectors_current[ego_id]['target'] = veh_target[ego_id]
         feature_vectors_current[ego_id]['self_stats'] = ego_stats[ego_id]
+        feature_vectors_current[ego_id]['distance_bott'] = np.array([bottle_neck_position_x - ego_stats[ego_id][0], 0])
+        feature_vectors_current[ego_id]['distance_end'] = np.array([1 - ego_stats[ego_id][0], 0])
+        feature_vectors_current[ego_id]['execution_action'] = np.array(self.action_execution['hist_1'][ego_id])
+        feature_vectors_current[ego_id]['generation_action'] = np.array(self.action_generation['hist_1'][ego_id])
         flat_surround_hdv[ego_id] = [item for sublist in surround_hdv_stats[ego_id] for item in sublist]
-        if len(flat_surround_hdv[ego_id]) < 24:
-            flat_surround_hdv[ego_id] += [0] * (24 - len(flat_surround_hdv[ego_id]))
+        if len(flat_surround_hdv[ego_id]) < 6*6:
+            flat_surround_hdv[ego_id] += [0] * (6*6 - len(flat_surround_hdv[ego_id]))
         flat_surround_cav[ego_id] = [item for sublist in surround_cav_stats[ego_id] for item in sublist]
-        if len(flat_surround_cav[ego_id]) < 24:
-            flat_surround_cav[ego_id] += [0] * (24 - len(flat_surround_cav[ego_id]))
+        if len(flat_surround_cav[ego_id]) < 6*6:
+            flat_surround_cav[ego_id] += [0] * (6*6 - len(flat_surround_cav[ego_id]))
         feature_vectors_current[ego_id]['surround_hdv_stats'] = flat_surround_hdv[ego_id]
         feature_vectors_current[ego_id]['surround_cav_stats'] = flat_surround_cav[ego_id]
         feature_vectors_current[ego_id]['ego_lane_stats'] = ego_lane_stats[ego_id]
         feature_vectors_current[ego_id]['left_lane_stats'] = left_lane_stats[ego_id]
         feature_vectors_current[ego_id]['right_lane_stats'] = right_lane_stats[ego_id]
+
+        # shared_feature_vectors[ego_id] = feature_vector.copy()  # EP mode
+        shared_feature_vectors[ego_id] = feature_vectors_current[ego_id]  # FP mode
 
     # A function to flatten a dictionary structure into 1D array
     def flatten_to_1d(data_dict):
@@ -913,28 +928,25 @@ def compute_hierarchical_ego_vehicle_features(
         return np.array(flat_list)
 
     # Flatten the dictionary structure
-    feature_vectors_current_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
+    feature_vectors_current_flatten = {ego_id: flatten_to_1d(feature_vectors) for ego_id, feature_vectors in
                                feature_vectors_current.items()}
     feature_vectors = {key: {} for key in ego_statistics.keys()}
     if self.use_hist_info:
         for ego_id, feature_vector_current in feature_vectors_current_flatten.items():
-            feature_vectors[ego_id]['1hist_4'] = self.hist_info['hist_4'][ego_id]
-            feature_vectors[ego_id]['2hist_3'] = self.hist_info['hist_3'][ego_id]
-            feature_vectors[ego_id]['3hist_2'] = self.hist_info['hist_2'][ego_id]
-            feature_vectors[ego_id]['4hist_1'] = self.hist_info['hist_1'][ego_id]
-            feature_vectors[ego_id]['5current'] = feature_vector_current
-
-            self.hist_info['hist_4'][ego_id] = self.hist_info['hist_3'][ego_id]
-            self.hist_info['hist_3'][ego_id] = self.hist_info['hist_2'][ego_id]
-            self.hist_info['hist_2'][ego_id] = self.hist_info['hist_1'][ego_id]
+            for i in range(self.hist_length):
+                feature_vectors[ego_id][f'{i}_hist_{self.hist_length-i}'] = self.hist_info[f'hist_{self.hist_length-i}'][ego_id]
+            feature_vectors[ego_id]['current'] = feature_vector_current
+            for i in range(self.hist_length-1):
+                self.hist_info[f'hist_{self.hist_length-i}'][ego_id] = self.hist_info[f'hist_{self.hist_length-i-1}'][ego_id]
             self.hist_info['hist_1'][ego_id] = feature_vector_current
     else:
-        for ego_id, feature_vector_current in feature_vectors_current_flatten.items():
+        for ego_id, feature_vector_current in feature_vectors_current.items():
             feature_vectors[ego_id] = feature_vector_current
     feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
                                        feature_vectors.items()}
+    shared_feature_vectors_flatten = {ego_id: flatten_to_1d(shared_feature_vector) for ego_id, shared_feature_vector in shared_feature_vectors.items()}
 
-    return feature_vectors_current, feature_vectors_current_flatten, feature_vectors, feature_vectors_flatten
+    return shared_feature_vectors, shared_feature_vectors_flatten, feature_vectors, feature_vectors_flatten
 def compute_hierarchical_ego_vehicle_features_ITSCversion(
         hdv_statistics: Dict[str, List[Union[float, str, Tuple[int]]]],
         ego_statistics: Dict[str, List[Union[float, str, Tuple[int]]]],
