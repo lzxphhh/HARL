@@ -199,3 +199,28 @@ class GAT(nn.Module):
         x = F.elu(self.out_att(x, adj))
         x = torch.mean(x, dim=1)  # Average pooling over nodes to get the graph-level output
         return x
+
+
+class MLP_improve(nn.Module):
+    def __init__(self, input_dim, output_dim, hidden_dim, num_layers, dropout=0.):
+        super(MLP_improve, self).__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        self.dropout = dropout
+
+        self.layers = nn.ModuleList([])
+        self.layers.append(nn.Linear(input_dim, hidden_dim))
+        self.layers.append(nn.ReLU())
+        self.layers.append(nn.Dropout(dropout))
+        for _ in range(num_layers - 2):
+            self.layers.append(nn.Linear(hidden_dim, hidden_dim))
+            self.layers.append(nn.ReLU())
+            self.layers.append(nn.Dropout(dropout))
+        self.layers.append(nn.Linear(hidden_dim, output_dim))
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x

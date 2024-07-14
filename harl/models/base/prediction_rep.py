@@ -31,21 +31,21 @@ class Prediction_rep(nn.Module):
         self.n_embd = n_embd
         self.action_type = action_type
 
-        self.gat_HDV_1s = GAT(nfeat=3, nhid=16, nclass=64, dropout=0.6, alpha=0.2, nheads=3)
         self.gat_CAV_1s = GAT(nfeat=3, nhid=16, nclass=64, dropout=0.6, alpha=0.2, nheads=3)
-        self.gat_CAV_1a = GAT(nfeat=6, nhid=64, nclass=64, dropout=0.6, alpha=0.2, nheads=3)
+        self.gat_CAV_1a = GAT(nfeat=6, nhid=16, nclass=64, dropout=0.6, alpha=0.2, nheads=3)
 
-        self.gat_HDV_5s = GAT(nfeat=64, nhid=64, nclass=64, dropout=0.6, alpha=0.2, nheads=3)
+        self.gat_HDV_5s = GAT(nfeat=32, nhid=64, nclass=64, dropout=0.6, alpha=0.2, nheads=1)
+        self.gat_CAV_5s = GAT(nfeat=32, nhid=64, nclass=64, dropout=0.6, alpha=0.2, nheads=1)
 
         self.mlp_all_lane = MLPBase(args, [18*6]) # ITSC version
-        self.mlp_combined = MLPBase(args, [64*4+10+3])
+        self.mlp_combined = MLPBase(args, [32+64*3+10+3])
 
         # history feature embedding
         self.leaky_relu = nn.LeakyReLU(0.1)
         self.relu = nn.ReLU()
-        self.self_embedding = nn.Linear(3*5, 128)
-        self.self_a_embedding = nn.Linear(6*5, 128)
-        self.dyn_embedding = nn.Linear(128, 64)
+        self.self_embedding = nn.Linear(3*5, 64)
+        self.self_a_embedding = nn.Linear(6*5, 64)
+        self.dyn_embedding = nn.Linear(64, 32)
 
         self.example_extend_history = {
             'history_5': torch.zeros(self.one_step_obs_dim),
@@ -59,21 +59,19 @@ class Prediction_rep(nn.Module):
             # 'bottle_neck_position': torch.zeros(2),
             'hdv_stats': torch.zeros(self.max_num_HDVs, 6),  # 0
             'cav_stats': torch.zeros(self.max_num_CAVs, 6),  # 1
-            'all_lane_stats': torch.zeros(18, 6),            # 2
-            'bottle_neck_position': torch.zeros(2),          # 3
-            # 'road_structure': torch.zeros(10),
-            'road_end': torch.zeros(2),                      # 4
-            'target': torch.zeros(2),                        # 5
-            'self_stats': torch.zeros(1, 13),                # 6
-            'distance_bott': torch.zeros(2),                 # 7
-            'distance_end': torch.zeros(2),                  # 8
-            'executed_action': torch.zeros(1, 2),            # 9
-            'generation_action': torch.zeros(1, 1),          # 10
-            'surround_hdv_stats': torch.zeros(6, 6),         # 11
-            'surround_cav_stats': torch.zeros(6, 6),         # 12
-            'ego_lane_stats': torch.zeros(1, 6),             # 13
-            'left_lane_stats': torch.zeros(1, 6),            # 14
-            'right_lane_stats': torch.zeros(1, 6)            # 15
+            'all_lane_stats': torch.zeros(18, 6),  # 2
+            'bottle_neck_position': torch.zeros(2),  # 3
+            'road_structure': torch.zeros(10),  # 4
+            'road_end': torch.zeros(2),  # 5
+            'target': torch.zeros(2),  # 6
+            'self_stats': torch.zeros(1, 13),  # 7
+            'distance_bott': torch.zeros(2),  # 8
+            'distance_end': torch.zeros(2),  # 9
+            'executed_action': torch.zeros(1, 2),  # 10
+            'generation_action': torch.zeros(1, 1),  # 11
+            'surround_hdv_stats': torch.zeros(6, 6),  # 12
+            'surround_cav_stats': torch.zeros(6, 6),  # 13
+            'surround_lane_stats': torch.zeros(3, 6),  # 14
         }
 
     def reconstruct_history(self, obs):
@@ -85,12 +83,12 @@ class Prediction_rep(nn.Module):
     def reconstruct_info(self, obs):
         reconstructed = self.reconstruct_obs_batch(obs, self.example_extend_info)
         return reconstructed['hdv_stats'], reconstructed['cav_stats'], reconstructed['all_lane_stats'], \
-            reconstructed['bottle_neck_position'], reconstructed['road_end'], \
+            reconstructed['bottle_neck_position'], reconstructed['road_structure'], reconstructed['road_end'], \
             reconstructed['target'], reconstructed['self_stats'], \
             reconstructed['distance_bott'], reconstructed['distance_end'], \
             reconstructed['executed_action'], reconstructed['generation_action'], \
             reconstructed['surround_hdv_stats'], reconstructed['surround_cav_stats'], \
-            reconstructed['ego_lane_stats'], reconstructed['left_lane_stats'], reconstructed['right_lane_stats']
+            reconstructed['surround_lane_stats']
 
     def forward(self, obs, batch_size=20):
         # obs: (n_rollout_thread, obs_dim)
@@ -110,23 +108,24 @@ class Prediction_rep(nn.Module):
 
         ############################## self_state & surrounding HDVs ##############################
         # Concatenate the focal node to the rest of the nodes
-        ego_stats_hist = torch.cat((info_hist_5[6][:, :, :3], info_hist_4[6][:, :, :3], info_hist_3[6][:, :, :3],
-                          info_hist_2[6][:, :, :3], info_hist_1[6][:, :, :3]), dim=2)
+        ego_stats_hist = torch.cat((info_hist_5[7][:, :, :3], info_hist_4[7][:, :, :3], info_hist_3[7][:, :, :3],
+                                    info_hist_2[7][:, :, :3], info_hist_1[7][:, :, :3]), dim=2)
         hdv_stats_hist = torch.cat((info_hist_5[0][:, :, :3], info_hist_4[0][:, :, :3], info_hist_3[0][:, :, :3],
-                            info_hist_2[0][:, :, :3], info_hist_1[0][:, :, :3]), dim=2)
+                                    info_hist_2[0][:, :, :3], info_hist_1[0][:, :, :3]), dim=2)
         cav_stats_hist = torch.cat((info_hist_5[1][:, :, :3], info_hist_4[1][:, :, :3], info_hist_3[1][:, :, :3],
-                            info_hist_2[1][:, :, :3], info_hist_1[1][:, :, :3]), dim=2)
+                                    info_hist_2[1][:, :, :3], info_hist_1[1][:, :, :3]), dim=2)
 
-        ego_motion_hist = torch.cat((info_hist_5[6][:, :, :3], info_hist_5[10], info_hist_5[9],
-                                     info_hist_4[6][:, :, :3], info_hist_4[10], info_hist_4[9],
-                                     info_hist_3[6][:, :, :3], info_hist_3[10], info_hist_3[9],
-                                     info_hist_2[6][:, :, :3], info_hist_2[10], info_hist_2[9],
-                                     info_hist_1[6][:, :, :3], info_hist_1[10], info_hist_1[9]), dim=2)
-        cav_motion_hist = torch.cat((info_hist_5[1], info_hist_4[1], info_hist_3[1], info_hist_2[1], info_hist_1[1]), dim=2)
+        ego_motion_hist = torch.cat((info_hist_5[7][:, :, :3], info_hist_5[11], info_hist_5[10],
+                                     info_hist_4[7][:, :, :3], info_hist_4[11], info_hist_4[10],
+                                     info_hist_3[7][:, :, :3], info_hist_3[11], info_hist_3[10],
+                                     info_hist_2[7][:, :, :3], info_hist_2[11], info_hist_2[10],
+                                     info_hist_1[7][:, :, :3], info_hist_1[11], info_hist_1[10]), dim=2)
+        cav_motion_hist = torch.cat((info_hist_5[1], info_hist_4[1], info_hist_3[1], info_hist_2[1], info_hist_1[1]),
+                                    dim=2)
 
-        # ego_motion_current = torch.cat((info_current[6][:, :, :3], info_current[10], info_current[9]), dim=2)
+        # ego_motion_current = torch.cat((info_current[7][:, :, :3], info_current[11], info_current[10]), dim=2)
         # cav_motion_current = info_current[1]
-        # ego_stats_current = info_current[6][:, :, :3]
+        # ego_stats_current = info_current[7][:, :, :3]
         # cav_stats_current = info_current[1][:, :, :3]
         # hdv_stats_current = info_current[0][:, :, :3]
         # self historical embedding
@@ -139,8 +138,10 @@ class Prediction_rep(nn.Module):
         hist_hdv_embedding = self.leaky_relu(self.dyn_embedding(self.leaky_relu(self.self_embedding(hdv_stats_hist))))
         # hist_cav_embedding = self.leaky_relu(self.dyn_embedding(self.leaky_relu(self.self_embedding(cav_stats_hist))))
 
-        hist_ego_a_embedding = self.leaky_relu(self.dyn_embedding(self.leaky_relu(self.self_a_embedding(ego_motion_hist))))
-        hist_cav_a_embedding = self.leaky_relu(self.dyn_embedding(self.leaky_relu(self.self_a_embedding(cav_motion_hist))))
+        hist_ego_a_embedding = self.leaky_relu(
+            self.dyn_embedding(self.leaky_relu(self.self_a_embedding(ego_motion_hist))))
+        hist_cav_a_embedding = self.leaky_relu(
+            self.dyn_embedding(self.leaky_relu(self.self_a_embedding(cav_motion_hist))))
         # GAT
         combined_ego2hdv_hist = torch.cat((hist_ego_embedding, hist_hdv_embedding), dim=1)
         ego2hdv_relation_hist = self.gat_HDV_5s(combined_ego2hdv_hist, self.adj_hdv.to(combined_ego2hdv_hist.device))
@@ -180,11 +181,11 @@ class Prediction_rep(nn.Module):
         # 04-'road_end': torch.zeros(2),
         # 08-'distance_end': torch.zeros(2),
         # 05-'target': torch.zeros(2),
-        road_embedding = torch.cat((info_current[3], info_current[7], info_current[4], info_current[8], info_current[5]), dim=1)
+        road_embedding = torch.cat((info_current[3], info_current[8], info_current[5], info_current[9], info_current[6]), dim=1)
 
         # Concatenate all the embeddings
-        exe_action = info_current[9].view(info_current[9].size(0), -1)
-        gen_action = info_current[10].view(info_current[10].size(0), -1)
+        exe_action = info_current[10].view(info_current[10].size(0), -1)
+        gen_action = info_current[11].view(info_current[11].size(0), -1)
         combined_embedding = torch.cat((ego_feature, hdv_relation, cav_relation, all_lanes_embedding, road_embedding, gen_action, exe_action), dim=1)
         combined_embedding = self.mlp_combined(combined_embedding)
 

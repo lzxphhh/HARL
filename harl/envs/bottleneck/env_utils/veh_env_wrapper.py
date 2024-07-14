@@ -169,6 +169,10 @@ class VehEnvWrapper(gym.Wrapper):
                 self.action_execution[f'hist_{i+1}'] = {ego_id: (0, 0.0) for ego_id in self.ego_ids}
         else:
             self.obs_size = self.self_obs_size
+        self.surround_vehicle = {ego_id: {} for ego_id in self.ego_ids}
+        self.required_surroundings = ['front', 'back', 'left_followers', 'right_followers', 'left_leaders', 'right_leaders']
+        self.safety_before = {ego_id: [] for ego_id in self.ego_ids}
+        self.safety_after = {ego_id: [] for ego_id in self.ego_ids}
 
     # #####################
     # Obs and Action Space
@@ -372,6 +376,7 @@ class VehEnvWrapper(gym.Wrapper):
         for vehicle_id in surrounding_vehicles.keys():
             state['vehicle'][vehicle_id]['surround'] = surrounding_vehicles[vehicle_id]
             state['vehicle'][vehicle_id]['surround_expand'] = sorrounding_vehicles_expand[vehicle_id]
+            self.surround_vehicle[vehicle_id] = surrounding_vehicles[vehicle_id]
 
         return state
 
@@ -504,6 +509,11 @@ class VehEnvWrapper(gym.Wrapper):
     def __update_actions(self, raw_action):
         """更新 ego 车辆的速度
         """
+        for vehicle_id in self.surround_vehicle.keys():
+            for key in self.required_surroundings:
+                if key not in self.surround_vehicle[vehicle_id]:
+                    self.surround_vehicle[vehicle_id][key] = 0
+
         for _veh_id in raw_action:
             if _veh_id in self.actions:  # 只更新 ego vehicle 的速度
                 # 只有换道动作，不需要更新速度
@@ -520,9 +530,436 @@ class VehEnvWrapper(gym.Wrapper):
                 else:
                     raise ValueError(f'Action {raw_action[_veh_id]} is not in the range of 0-5')
 
-                self.actions[_veh_id] = self.action_command
+                self.actions[_veh_id] = self.lower_controller(_veh_id, self.action_command, 2)
+                # self.actions[_veh_id] = self.action_command
 
         return self.actions
+    def lower_controller_0712(self, _veh_id, action, acc_improve):
+        LC_th = [2, 5]
+        keep_th = [1.5, 3, 20]
+        bottleneck_th = [1, 3, 10]
+        bottleneck_point = self.bottle_neck_positions[0] - 20
+        bottleneck_start = self.bottle_neck_positions[0] - 150
+        bottleneck_end = bottleneck_point
+        LC_improve = 0
+        if self.vehicles_info:
+            if action[0] != 0:
+                if action[0] == 1:
+                    leader_dis = self.surround_vehicle[_veh_id]['left_leaders'][1] if self.surround_vehicle[_veh_id]['left_leaders'] else 100
+                    leader_v = self.surround_vehicle[_veh_id]['left_leaders'][3] if self.surround_vehicle[_veh_id]['left_leaders'] else 1
+                    follower_dis = self.surround_vehicle[_veh_id]['left_followers'][1] if self.surround_vehicle[_veh_id]['left_followers'] else -100
+                    follower_v = self.surround_vehicle[_veh_id]['left_followers'][3] if self.surround_vehicle[_veh_id]['left_followers'] else -1
+                    leader_TTC = leader_dis / leader_v if leader_v != 0 else abs(leader_dis)
+                    if leader_TTC < 0 and leader_dis > 0:
+                        leader_TTC = 100
+                    elif leader_TTC > 0 and leader_dis < 0:
+                        leader_TTC = -leader_TTC
+                    follower_TTC = follower_dis / follower_v if follower_v != 0 else abs(follower_dis)
+                    if follower_TTC < 0 and follower_dis < 0:
+                        follower_TTC = 100
+                    elif follower_TTC > 0 and follower_dis > 0:
+                        follower_TTC = -follower_TTC
+                else:
+                    leader_dis = self.surround_vehicle[_veh_id]['right_leaders'][1] if self.surround_vehicle[_veh_id]['right_leaders'] else 100
+                    leader_v = self.surround_vehicle[_veh_id]['right_leaders'][3] if self.surround_vehicle[_veh_id]['right_leaders'] else 1
+                    follower_dis = self.surround_vehicle[_veh_id]['right_followers'][1] if self.surround_vehicle[_veh_id]['right_followers'] else -100
+                    follower_v = self.surround_vehicle[_veh_id]['right_followers'][3] if self.surround_vehicle[_veh_id]['right_followers'] else -1
+                    leader_TTC = leader_dis / leader_v if leader_v != 0 else abs(leader_dis)
+                    if leader_TTC < 0 and leader_dis > 0:
+                        leader_TTC = 100
+                    elif leader_TTC > 0 and leader_dis < 0:
+                        leader_TTC = -leader_TTC
+                    follower_TTC = follower_dis / follower_v if follower_v != 0 else abs(follower_dis)
+                    if follower_TTC < 0 and follower_dis < 0:
+                        follower_TTC = 100
+                    elif follower_TTC > 0 and follower_dis > 0:
+                        follower_TTC = -follower_TTC
+                if leader_TTC <= LC_th[0] or follower_TTC <= LC_th[0]:
+                    if self.vehicles_info[_veh_id][4] > bottleneck_start and self.vehicles_info[_veh_id][4] < bottleneck_end:
+                        action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * acc_improve))
+                        LC_improve = 1
+                    else:
+                        action = (0, self.current_speed[_veh_id])
+                elif leader_TTC <= LC_th[1]:
+                    if follower_dis < -2:
+                        action = (action[0], max(0, self.current_speed[_veh_id]-self.delta_t*max(acc_improve, leader_v/leader_TTC+1)))
+                    else:
+                        action = (0, self.current_speed[_veh_id])
+                elif follower_TTC <= LC_th[1]:
+                    action = (action[0], min(15, self.current_speed[_veh_id] - self.delta_t * follower_v))
+                else:
+                    action = action
+            if action[0] == 0:
+                if self.vehicles_info[_veh_id][4] > bottleneck_point and abs(self.vehicles_info[_veh_id][5]) > 2:
+                    if self.vehicles_info[_veh_id][5] < -2:
+                        if self.surround_vehicle[_veh_id]['front']:
+                            leader_dis = self.surround_vehicle[_veh_id]['front'][1]
+                            leader_v = self.surround_vehicle[_veh_id]['front'][3]
+                            follower_dis = -100
+                            follower_v = -1
+                        else:
+                            if self.surround_vehicle[_veh_id]['left_leaders']:
+                                leader_dis = self.surround_vehicle[_veh_id]['left_leaders'][1]
+                                leader_v = self.surround_vehicle[_veh_id]['left_leaders'][3]
+                            else:
+                                leader_dis = 100
+                                leader_v = 1
+                            if self.surround_vehicle[_veh_id]['left_followers']:
+                                follower_dis = self.surround_vehicle[_veh_id]['left_followers'][1]
+                                follower_v = self.surround_vehicle[_veh_id]['left_followers'][3]
+                            else:
+                                follower_dis = -100
+                                follower_v = -1
+                        leader_TTC = leader_dis / leader_v if leader_v != 0 else abs(leader_dis)
+                        leader_speed = self.current_speed[_veh_id] - self.delta_t * leader_v
+                        leader_TTC = leader_dis / leader_v if leader_v != 0 else abs(leader_dis)
+                        follower_TTC = follower_dis / follower_v if follower_v != 0 else abs(follower_dis)
+                        if leader_TTC < 0 and leader_dis > 5 and leader_speed > 10:
+                            leader_TTC = 100
+                        elif leader_TTC > 0 and leader_dis < 0:
+                            leader_TTC = -leader_TTC
+                        follower_TTC = follower_dis / follower_v if follower_v != 0 else abs(follower_dis)
+                        if follower_TTC < 0 and follower_dis < -10:
+                            follower_TTC = 100
+                        elif follower_TTC > 0 and follower_dis > 0:
+                            follower_TTC = -follower_TTC
+                    else:
+                        if self.surround_vehicle[_veh_id]['front']:
+                            leader_dis = self.surround_vehicle[_veh_id]['front'][1]
+                            leader_v = self.surround_vehicle[_veh_id]['front'][3]
+                            follower_dis = 100
+                            follower_v = 1
+                        else:
+                            if self.surround_vehicle[_veh_id]['right_leaders']:
+                                leader_dis = self.surround_vehicle[_veh_id]['right_leaders'][1]
+                                leader_v = self.surround_vehicle[_veh_id]['right_leaders'][3]
+                            else:
+                                leader_dis = 100
+                                leader_v = 1
+                            if self.surround_vehicle[_veh_id]['right_followers']:
+                                follower_dis = self.surround_vehicle[_veh_id]['right_followers'][1]
+                                follower_v = self.surround_vehicle[_veh_id]['right_followers'][3]
+                            else:
+                                follower_dis = -100
+                                follower_v = -1
+                        leader_TTC = leader_dis / leader_v if leader_v != 0 else abs(leader_dis)
+                        leader_speed = self.current_speed[_veh_id] - self.delta_t * leader_v
+                        if leader_TTC < 0 and leader_dis > 5 and leader_speed > 10:
+                            leader_TTC = 100
+                        elif leader_TTC > 0 and leader_dis < 0:
+                            leader_TTC = -leader_TTC
+                        follower_TTC = follower_dis / follower_v if follower_v != 0 else abs(follower_dis)
+                        if follower_TTC < 0 and follower_dis > 10:
+                            follower_TTC = 100
+                        elif follower_TTC > 0 and follower_dis < 0:
+                            follower_TTC = -follower_TTC
+                    if leader_TTC <= bottleneck_th[0] or follower_TTC <= bottleneck_th[0]:
+                        action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * 7))
+                    elif leader_TTC <= bottleneck_th[1]:
+                        action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * 3))
+                    else:
+                        action = action
+                else:
+                    leader_dis = self.surround_vehicle[_veh_id]['front'][1] if self.surround_vehicle[_veh_id]['front'] else 100
+                    leader_v = self.surround_vehicle[_veh_id]['front'][3] if self.surround_vehicle[_veh_id]['front'] else 1
+                    leader_TTC = leader_dis / leader_v if leader_v != 0 else abs(leader_dis)
+                    follower_TTC = 100
+                    if leader_TTC < 0 and leader_dis > 0:
+                        leader_TTC = 100
+                    elif leader_TTC > 0 and leader_dis < 0:
+                        leader_TTC = -leader_TTC
+                    if leader_TTC < keep_th[0]:
+                        action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * max(leader_v/leader_TTC+2, acc_improve)))
+                    elif leader_TTC < keep_th[1]:
+                        action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * max(leader_v/leader_TTC, acc_improve)))
+                    elif leader_TTC < keep_th[2]:
+                        if leader_dis > 10:
+                            if LC_improve:
+                                action = action
+                            else:
+                                action = (0, self.current_speed[_veh_id]) if action[1] > self.current_speed[_veh_id] else action
+                        else:
+                            action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * max(leader_v/leader_TTC, acc_improve)))
+                    else:
+                        action = action
+
+            self.safety_before[_veh_id].append(max(1 / leader_TTC, 1 / follower_TTC))
+
+        return action
+
+    def lower_controller_0714(self, _veh_id, action, acc_improve):
+        ### 下层控制器--基于安全评估的控制微调
+        bottleneck_point = self.bottle_neck_positions[0] - 20
+        bottleneck_th = [2, 5, 10]
+        if action[0] == 1:
+            if self.surround_vehicle[_veh_id]['left_leaders']:
+                relative_distance = self.surround_vehicle[_veh_id]['left_leaders'][1]
+                relative_speed = self.surround_vehicle[_veh_id]['left_leaders'][3]
+                if relative_distance <= 1:
+                    action = (0, self.current_speed[_veh_id])
+                elif relative_distance <= 5:
+                    if relative_speed > 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            action = (0, self.current_speed[_veh_id])
+                        elif time_collision <= 5:
+                            action = (1, max(0, self.current_speed[_veh_id] - self.delta_t * max(acc_improve, relative_speed)))
+                elif relative_distance <= 15:
+                    if relative_speed > 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            action = (1, max(0, self.current_speed[_veh_id] - self.delta_t * max(acc_improve, relative_speed)))
+            if self.surround_vehicle[_veh_id]['left_followers']:
+                relative_distance = self.surround_vehicle[_veh_id]['left_followers'][1]
+                relative_speed = self.surround_vehicle[_veh_id]['left_followers'][3]
+                if relative_distance >= -1:
+                    action = (0, self.current_speed[_veh_id])
+                elif relative_distance >= -5:
+                    if relative_speed < 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            action = (0, self.current_speed[_veh_id])
+                        elif time_collision <= 5:
+                            if action[1] != self.current_speed[_veh_id]:
+                                action = (0, self.current_speed[_veh_id])
+                elif relative_distance >= -15:
+                    if relative_speed < 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            if action[1] != self.current_speed[_veh_id]:
+                                action = (0, self.current_speed[_veh_id])
+        if action[0] == 2:
+            if self.surround_vehicle[_veh_id]['right_leaders']:
+                relative_distance = self.surround_vehicle[_veh_id]['right_leaders'][1]
+                relative_speed = self.surround_vehicle[_veh_id]['right_leaders'][3]
+                if relative_distance <= 1:
+                    action = (0, self.current_speed[_veh_id])
+                elif relative_distance <= 5:
+                    if relative_speed > 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            action = (0, self.current_speed[_veh_id])
+                        elif time_collision <= 5:
+                            action = (2, max(0, self.current_speed[_veh_id] - self.delta_t * max(acc_improve, relative_speed)))
+                elif relative_distance <= 15:
+                    if relative_speed > 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            action = (2, max(0, self.current_speed[_veh_id] - self.delta_t * max(acc_improve, relative_speed)))
+            if self.surround_vehicle[_veh_id]['right_followers']:
+                relative_distance = self.surround_vehicle[_veh_id]['right_followers'][1]
+                relative_speed = self.surround_vehicle[_veh_id]['right_followers'][3]
+                if relative_distance >= -1:
+                    action = (0, self.current_speed[_veh_id])
+                elif relative_distance >= -5:
+                    if relative_speed < 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            action = (0, self.current_speed[_veh_id])
+                        elif time_collision <= 5:
+                            if action[1] != self.current_speed[_veh_id]:
+                                action = (0, self.current_speed[_veh_id])
+                elif relative_distance >= -15:
+                    if relative_speed < 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            if action[1] != self.current_speed[_veh_id]:
+                                action = (0, self.current_speed[_veh_id])
+        if action[0] == 0:
+            if self.surround_vehicle[_veh_id]['front']:
+                relative_distance = self.surround_vehicle[_veh_id]['front'][1]
+                relative_speed = self.surround_vehicle[_veh_id]['front'][3]
+                if relative_distance <= 8:
+                    if relative_speed > 0:
+                        action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * max(acc_improve, relative_speed + 2)))
+                    elif self.vehicles_info[_veh_id][4] > bottleneck_point and relative_speed > -2:
+                        action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * acc_improve))
+                    elif action[1] > self.current_speed[_veh_id]:
+                        action = (0, self.current_speed[_veh_id])
+                elif relative_distance <= 15:
+                    if relative_speed > 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 3:
+                            action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * max(acc_improve, relative_speed)))
+                        elif time_collision <= 5:
+                            if action[1] > self.current_speed[_veh_id]:
+                                action = (0, self.current_speed[_veh_id])
+            else:
+                if self.vehicles_info:
+                    if self.vehicles_info[_veh_id][4] > bottleneck_point and abs(self.vehicles_info[_veh_id][5]) > 2:
+                        if self.vehicles_info[_veh_id][5] < -2:
+                            if self.surround_vehicle[_veh_id]['front']:
+                                leader_dis = self.surround_vehicle[_veh_id]['front'][1]
+                                leader_v = self.surround_vehicle[_veh_id]['front'][3]
+                                follower_dis = -100
+                                follower_v = -1
+                            else:
+                                if self.surround_vehicle[_veh_id]['left_leaders']:
+                                    leader_dis = self.surround_vehicle[_veh_id]['left_leaders'][1]
+                                    leader_v = self.surround_vehicle[_veh_id]['left_leaders'][3]
+                                else:
+                                    leader_dis = 100
+                                    leader_v = 1
+                                if self.surround_vehicle[_veh_id]['left_followers']:
+                                    follower_dis = self.surround_vehicle[_veh_id]['left_followers'][1]
+                                    follower_v = self.surround_vehicle[_veh_id]['left_followers'][3]
+                                else:
+                                    follower_dis = -100
+                                    follower_v = -1
+                            leader_TTC = leader_dis / leader_v if leader_v != 0 else abs(leader_dis)
+                            leader_speed = self.current_speed[_veh_id] - self.delta_t * leader_v
+                            if leader_TTC < 0 and leader_dis > 5 and leader_speed > 10:
+                                leader_TTC = 100
+                            elif leader_TTC > 0 and leader_dis < 0:
+                                leader_TTC = -leader_TTC
+                            follower_TTC = follower_dis / follower_v if follower_v != 0 else abs(follower_dis)
+                            if follower_TTC < 0 and follower_dis < -10:
+                                follower_TTC = 100
+                            elif follower_TTC > 0 and follower_dis > 0:
+                                follower_TTC = -follower_TTC
+                        else:
+                            if self.surround_vehicle[_veh_id]['front']:
+                                leader_dis = self.surround_vehicle[_veh_id]['front'][1]
+                                leader_v = self.surround_vehicle[_veh_id]['front'][3]
+                                follower_dis = 100
+                                follower_v = 1
+                            else:
+                                if self.surround_vehicle[_veh_id]['right_leaders']:
+                                    leader_dis = self.surround_vehicle[_veh_id]['right_leaders'][1]
+                                    leader_v = self.surround_vehicle[_veh_id]['right_leaders'][3]
+                                else:
+                                    leader_dis = 100
+                                    leader_v = 1
+                                if self.surround_vehicle[_veh_id]['right_followers']:
+                                    follower_dis = self.surround_vehicle[_veh_id]['right_followers'][1]
+                                    follower_v = self.surround_vehicle[_veh_id]['right_followers'][3]
+                                else:
+                                    follower_dis = -100
+                                    follower_v = -1
+                            leader_TTC = leader_dis / leader_v if leader_v != 0 else abs(leader_dis)
+                            leader_speed = self.current_speed[_veh_id] - self.delta_t * leader_v
+                            if leader_TTC < 0 and leader_dis > 5 and leader_speed > 10:
+                                leader_TTC = 100
+                            elif leader_TTC > 0 and leader_dis < 0:
+                                leader_TTC = -leader_TTC
+                            follower_TTC = follower_dis / follower_v if follower_v != 0 else abs(follower_dis)
+                            if follower_TTC < 0 and follower_dis > 10:
+                                follower_TTC = 100
+                            elif follower_TTC > 0 and follower_dis < 0:
+                                follower_TTC = -follower_TTC
+                        if leader_TTC <= bottleneck_th[0] or follower_TTC <= bottleneck_th[0]:
+                            action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * 7))
+                        elif leader_TTC <= bottleneck_th[1]:
+                            action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * 3))
+                        else:
+                            action = (0, self.current_speed[_veh_id])
+        return action
+
+    def lower_controller(self, _veh_id, action, acc_improve):
+        ### 下层控制器--基于安全评估的控制微调
+        if action[0] == 1:
+            if self.surround_vehicle[_veh_id]['left_leaders']:
+                relative_distance = self.surround_vehicle[_veh_id]['left_leaders'][1]
+                relative_speed = self.surround_vehicle[_veh_id]['left_leaders'][3]
+                if relative_distance <= 1:
+                    action = (0, self.current_speed[_veh_id])
+                elif relative_distance <= 5:
+                    if relative_speed > 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            action = (0, self.current_speed[_veh_id])
+                        elif time_collision <= 5:
+                            action = (1, max(0, self.current_speed[_veh_id]-self.delta_t*max(acc_improve, relative_speed)))
+                elif relative_distance <= 15:
+                    if relative_speed > 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            action = (1, max(0, self.current_speed[_veh_id]-self.delta_t*max(acc_improve, relative_speed)))
+            if self.surround_vehicle[_veh_id]['left_followers']:
+                relative_distance = self.surround_vehicle[_veh_id]['left_followers'][1]
+                relative_speed = self.surround_vehicle[_veh_id]['left_followers'][3]
+                if relative_distance >= -1:
+                    action = (0, self.current_speed[_veh_id])
+                elif relative_distance >= -5:
+                    if relative_speed < 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            action = (0, self.current_speed[_veh_id])
+                        elif time_collision <= 5:
+                            if action[1] != self.current_speed[_veh_id]:
+                                action = (0, self.current_speed[_veh_id])
+                elif relative_distance >= -15:
+                    if relative_speed < 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            if action[1] != self.current_speed[_veh_id]:
+                                action = (0, self.current_speed[_veh_id])
+        if action[0] == 2:
+            if self.surround_vehicle[_veh_id]['right_leaders']:
+                relative_distance = self.surround_vehicle[_veh_id]['right_leaders'][1]
+                relative_speed = self.surround_vehicle[_veh_id]['right_leaders'][3]
+                if relative_distance <= 1:
+                    action = (0, self.current_speed[_veh_id])
+                elif relative_distance <= 5:
+                    if relative_speed > 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            action = (0, self.current_speed[_veh_id])
+                        elif time_collision <= 5:
+                            action = (2, max(0, self.current_speed[_veh_id]-self.delta_t*max(acc_improve, relative_speed)))
+                elif relative_distance <= 15:
+                    if relative_speed > 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            action = (2, max(0, self.current_speed[_veh_id]-self.delta_t*max(acc_improve, relative_speed)))
+            if self.surround_vehicle[_veh_id]['right_followers']:
+                relative_distance = self.surround_vehicle[_veh_id]['right_followers'][1]
+                relative_speed = self.surround_vehicle[_veh_id]['right_followers'][3]
+                if relative_distance >= -1:
+                    action = (0, self.current_speed[_veh_id])
+                elif relative_distance >= -5:
+                    if relative_speed < 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            action = (0, self.current_speed[_veh_id])
+                        elif time_collision <= 5:
+                            if action[1] != self.current_speed[_veh_id]:
+                                action = (0, self.current_speed[_veh_id])
+                elif relative_distance >= -15:
+                    if relative_speed < 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 2:
+                            if action[1] != self.current_speed[_veh_id]:
+                                action = (0, self.current_speed[_veh_id])
+        if action[0] == 0:
+            if self.surround_vehicle[_veh_id]['front']:
+                relative_distance = self.surround_vehicle[_veh_id]['front'][1]
+                relative_speed = self.surround_vehicle[_veh_id]['front'][3]
+                if relative_distance <= 5:
+                    if relative_speed > 0:
+                        action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * max(acc_improve, relative_speed+2)))
+                elif relative_distance <= 8:
+                    if relative_speed > 0:
+                        action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * max(acc_improve, relative_speed+2)))
+                    else:
+                        if action[1] > self.current_speed[_veh_id]:
+                            action = (0, self.current_speed[_veh_id])
+                elif relative_distance <= 15:
+                    if relative_speed > 0:
+                        time_collision = relative_distance / relative_speed
+                        if time_collision <= 3:
+                            action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * max(acc_improve, relative_speed)))
+                        elif time_collision <= 5:
+                            if action[1] > self.current_speed[_veh_id]:
+                                action = (0, self.current_speed[_veh_id])
+                    # elif relative_speed < 0:
+                    #     action = (0, min(15, self.current_speed[_veh_id] + self.delta_t * acc_improve))
+                # else:
+                #     if relative_speed <= 0:
+                #         action = (0, min(15, self.current_speed[_veh_id] + self.delta_t * acc_improve))
+            # else:
+            #     action = (0, min(15, self.current_speed[_veh_id] + self.delta_t * acc_improve))
+        return action
 
     # ##########################
     # State and Reward Wrappers

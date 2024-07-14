@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from harl.models.base.mlp import MLPBase
-from harl.models.base.simple_layers import CrossAttention, GAT
+from harl.models.base.simple_layers import CrossAttention, GAT, MLP_improve
 from einops import rearrange, repeat
 
 class Cross_aware_rep(nn.Module):
@@ -34,26 +34,27 @@ class Cross_aware_rep(nn.Module):
 
         ###### global encoder ######
         # self.mlp_road = MLPBase(args, [10])
-        self.mlp_all_cav_a = MLPBase(args, [self.max_num_CAVs*6])
-        self.mlp_all_cav = MLPBase(args, [self.max_num_CAVs*3])
-        self.mlp_all_hdv = MLPBase(args, [self.max_num_HDVs*3])
-        self.mlp_all_lane = MLPBase(args, [18 * 6])
-        self.mlp_global_combined = MLPBase(args, [10+64*3])
+        # self.mlp_all_cav_a = MLPBase(args, [self.max_num_CAVs*6])
+        # self.mlp_all_cav = MLPBase(args, [self.max_num_CAVs*3])
+        # self.mlp_all_hdv = MLPBase(args, [self.max_num_HDVs*3])
+        # self.mlp_all_lane = MLPBase(args, [18 * 6])
+        # self.mlp_global_combined = MLPBase(args, [10+64*3])
 
         ###### local encoder ######
-        self.mlp_target = MLPBase(args, [2])
+        # self.mlp_target = MLPBase(args, [2])
 
-        self.gat_CAV_1s = GAT(nfeat=3, nhid=16, nclass=64, dropout=0.1, alpha=0.2, nheads=3)
-        self.gat_CAV_1a = GAT(nfeat=6, nhid=16, nclass=64, dropout=0.1, alpha=0.2, nheads=3)
-        self.gat_HDV_1s = GAT(nfeat=3, nhid=16, nclass=64, dropout=0.1, alpha=0.2, nheads=3)
-        self.gat_HDV_5s = GAT(nfeat=3*5, nhid=16, nclass=64, dropout=0.1, alpha=0.2, nheads=3)
+        # self.gat_CAV_1s = GAT(nfeat=3, nhid=16, nclass=64, dropout=0.1, alpha=0.2, nheads=1)
+        self.gat_CAV_1a = GAT(nfeat=6, nhid=16, nclass=64, dropout=0.1, alpha=0.2, nheads=1)
+        # self.gat_HDV_1s = GAT(nfeat=3, nhid=16, nclass=64, dropout=0.1, alpha=0.2, nheads=1)
+        self.gat_HDV_5s = GAT(nfeat=3*5, nhid=32, nclass=64, dropout=0.1, alpha=0.2, nheads=1)
 
         self.mlp_surround_lane = MLPBase(args, [3 * 6])
-        self.mlp_local_combined = MLPBase(args, [10+64*3+3])
+        # self.mlp_lane = MLP_improve(input_dim=3*6, output_dim=64, hidden_dim=64, num_layers=2, dropout=0.2)
+        self.mlp_local_combined = MLPBase(args, [10+64*3])
 
         # cross-aware encoder
-        self.cross_attention = CrossAttention(64*3+10, 8, 64, 0.1)
-        self.mlp_combined = MLPBase(args, [64*3+10])
+        # self.cross_attention = CrossAttention(64*3+10, 8, 64, 0.1)
+        # self.mlp_combined = MLPBase(args, [64*3+10])
 
         self.example_extend_history = {
             'history_5': torch.zeros(self.one_step_obs_dim),
@@ -109,34 +110,34 @@ class Cross_aware_rep(nn.Module):
         info_hist_1 = self.reconstruct_info(history_1)
         info_current = self.reconstruct_info(current)
 
-        self.adj_all_cav = torch.ones(batch_size, self.max_num_CAVs + 1, self.max_num_CAVs + 1)
-        self.adj_all_cav[:, 1:, 1:] = 0
-        self.adj_all_hdv = torch.ones(batch_size, self.max_num_HDVs + 1, self.max_num_HDVs + 1)
-        self.adj_all_hdv[:, 1:, 1:] = 0
+        # self.adj_all_cav = torch.ones(batch_size, self.max_num_CAVs + 1, self.max_num_CAVs + 1)
+        # self.adj_all_cav[:, 1:, 1:] = 0
+        # self.adj_all_hdv = torch.ones(batch_size, self.max_num_HDVs + 1, self.max_num_HDVs + 1)
+        # self.adj_all_hdv[:, 1:, 1:] = 0
         self.adj_surround_cav = torch.ones(batch_size, 6+1, 6+1)
         self.adj_surround_cav[:, 1:, 1:] = 0
         self.adj_surround_hdv = torch.ones(batch_size, 6+1, 6+1)
         self.adj_surround_hdv[:, 1:, 1:] = 0
 
         ################################################## global embedding ######################################################
-        global_road_info = info_current[4]
-        global_cav_stats = info_current[1]
-        ego_stats_current = info_current[7][:, :, :3]
-        cav_stats_current = info_current[1][:, :, :3]
-        hdv_stats_current = info_current[0][:, :, :3]
-        global_lane_stats = info_current[2]
+        # global_road_info = info_current[4]
+        # global_cav_stats = info_current[1]
+        # ego_stats_current = info_current[7][:, :, :3]
+        # cav_stats_current = info_current[1][:, :, :3]
+        # hdv_stats_current = info_current[0][:, :, :3]
+        # global_lane_stats = info_current[2]
 
         # global_cav_embedding = self.mlp_all_cav_a(global_cav_stats.view(global_cav_stats.size(0), -1))
-        global_cav_embedding = self.mlp_all_cav(cav_stats_current.reshape(cav_stats_current.size(0), -1))
-        global_hdv_embedding = self.mlp_all_hdv(hdv_stats_current.reshape(hdv_stats_current.size(0), -1))
-        global_lane_embedding = self.mlp_all_lane(global_lane_stats.view(global_lane_stats.size(0), -1))
+        # global_cav_embedding = self.mlp_all_cav(cav_stats_current.reshape(cav_stats_current.size(0), -1))
+        # global_hdv_embedding = self.mlp_all_hdv(hdv_stats_current.reshape(hdv_stats_current.size(0), -1))
+        # global_lane_embedding = self.mlp_all_lane(global_lane_stats.view(global_lane_stats.size(0), -1))
 
         # global_ego2hdv_current = torch.cat((ego_stats_current, hdv_stats_current), dim=1)
         # global_ego2hdv_relation = self.gat_HDV_1s(global_ego2hdv_current, self.adj_all_hdv.to(global_ego2hdv_current.device))
         # global_ego2cav_current = torch.cat((ego_stats_current, cav_stats_current), dim=1)
         # global_ego2cav_relation = self.gat_CAV_1s(global_ego2cav_current, self.adj_all_cav.to(global_ego2cav_current.device))
 
-        global_combined_embedding = torch.cat((global_road_info, global_cav_embedding, global_hdv_embedding, global_lane_embedding), dim=1)
+        # global_combined_embedding = torch.cat((global_road_info, global_cav_embedding, global_hdv_embedding, global_lane_embedding), dim=1)
         # global_combined_embedding = self.mlp_global_combined(global_combined_embedding)
 
         ################################################## local embedding ######################################################
@@ -147,44 +148,47 @@ class Cross_aware_rep(nn.Module):
         # 09-'distance_end': torch.zeros(2),
         # 06-'target': torch.zeros(2),
         local_road_info = torch.cat((info_current[8], info_current[5][:, :1], info_current[9], info_current[6]), dim=1)
-        local_surround_cav_stats = info_current[13][:, :, :3]
-        # local_surround_cav_motion = info_current[13]
-        local_surround_hdv_stats = info_current[12][:, :, :3]
-        local_ego_stats = info_current[7][:, :, :3]
-        # local_ego_motion = torch.cat((info_current[7][:, :, :3], info_current[11], info_current[10]), dim=2)
+        # local_road_info = torch.cat((info_current[4], info_current[3], info_current[8], info_current[5], info_current[9], info_current[6]), dim=1)
+        # local_surround_cav_stats = info_current[13][:, :, :3]
+        local_surround_cav_motion = info_current[13]
+        # local_surround_hdv_stats = info_current[12][:, :, :3]
+        # local_ego_stats = info_current[7][:, :, :3]
+        local_ego_motion = torch.cat((info_current[7][:, :, :3], info_current[11], info_current[10]), dim=2)
         local_surround_lane_stats = info_current[14]
 
-        # ego_hist = torch.cat((info_hist_4[7][:, :, :3], info_hist_3[7][:, :, :3], info_hist_2[7][:, :, :3],
-        #                       info_hist_1[7][:, :, :3], info_current[7][:, :, :3]), dim=2)
-        # hdv_hist = torch.cat((info_hist_4[12][:, :, :3], info_hist_3[12][:, :, :3], info_hist_2[12][:, :, :3],
-        #                       info_hist_1[12][:, :, :3], info_current[12][:, :, :3]), dim=2)
+        ego_hist = torch.cat((info_hist_4[7][:, :, :3], info_hist_3[7][:, :, :3], info_hist_2[7][:, :, :3],
+                              info_hist_1[7][:, :, :3], info_current[7][:, :, :3]), dim=2)
+        hdv_hist = torch.cat((info_hist_4[12][:, :, :3], info_hist_3[12][:, :, :3], info_hist_2[12][:, :, :3],
+                              info_hist_1[12][:, :, :3], info_current[12][:, :, :3]), dim=2)
 
-        combined_ego2hdv_current = torch.cat((local_ego_stats, local_surround_hdv_stats), dim=1)
-        ego2hdv_relation_current = self.gat_HDV_1s(combined_ego2hdv_current, self.adj_surround_hdv.to(combined_ego2hdv_current.device))
-        # combined_ego2hdv_hist = torch.cat((ego_hist, hdv_hist), dim=1)
-        # ego2hdv_relation_hist = self.gat_HDV_5s(combined_ego2hdv_hist, self.adj_surround_hdv.to(combined_ego2hdv_hist.device))
+        # combined_ego2hdv_current = torch.cat((local_ego_stats, local_surround_hdv_stats), dim=1)
+        # ego2hdv_relation_current = self.gat_HDV_1s(combined_ego2hdv_current, self.adj_surround_hdv.to(combined_ego2hdv_current.device))
+        combined_ego2hdv_hist = torch.cat((ego_hist, hdv_hist), dim=1)
+        ego2hdv_relation_hist = self.gat_HDV_5s(combined_ego2hdv_hist, self.adj_surround_hdv.to(combined_ego2hdv_hist.device))
 
-        combined_ego2cav_current = torch.cat((local_ego_stats, local_surround_cav_stats), dim=1)
-        ego2cav_relation_current = self.gat_CAV_1s(combined_ego2cav_current, self.adj_surround_cav.to(combined_ego2cav_current.device))
-        # combined_ego2cav_current_a = torch.cat((local_ego_motion, local_surround_cav_motion), dim=1)
-        # ego2cav_relation_current_a = self.gat_CAV_1a(combined_ego2cav_current_a, self.adj_surround_cav.to(combined_ego2cav_current_a.device))
+        # combined_ego2cav_current = torch.cat((local_ego_stats, local_surround_cav_stats), dim=1)
+        # ego2cav_relation_current = self.gat_CAV_1s(combined_ego2cav_current, self.adj_surround_cav.to(combined_ego2cav_current.device))
+        combined_ego2cav_current_a = torch.cat((local_ego_motion, local_surround_cav_motion), dim=1)
+        ego2cav_relation_current_a = self.gat_CAV_1a(combined_ego2cav_current_a, self.adj_surround_cav.to(combined_ego2cav_current_a.device))
 
-        local_cav_relation = ego2cav_relation_current
-        local_hdv_relation = ego2hdv_relation_current
+        local_cav_relation = ego2cav_relation_current_a
+        local_hdv_relation = ego2hdv_relation_hist
         local_lane_embedding = self.mlp_surround_lane(local_surround_lane_stats.view(local_surround_lane_stats.size(0), -1))
+        # local_lane_embedding = self.mlp_lane(local_surround_lane_stats.view(local_surround_lane_stats.size(0), -1))
+        # local_lane_embedding = local_surround_lane_stats.view(local_surround_lane_stats.size(0), -1)
         exe_action = info_current[10].view(info_current[10].size(0), -1)
         gen_action = info_current[11].view(info_current[11].size(0), -1)
         local_combined_embedding = torch.cat((local_road_info, gen_action, exe_action, local_cav_relation, local_hdv_relation, local_lane_embedding), dim=1)
-        # local_combined_embedding = self.mlp_local_combined(local_combined_embedding)
+        local_combined_embedding = self.mlp_local_combined(local_combined_embedding)
 
         # cross-aware representation
-        input1 = global_combined_embedding.unsqueeze(1)
-        input2 = local_combined_embedding.unsqueeze(1)
-        cross_embedding = self.cross_attention(input1, input2)
-        cross_embedding = cross_embedding.squeeze(1)
-        cross_embedding = self.mlp_combined(cross_embedding)
+        # input1 = global_combined_embedding.unsqueeze(1)
+        # input2 = local_combined_embedding.unsqueeze(1)
+        # cross_embedding = self.cross_attention(input1, input2)
+        # cross_embedding = cross_embedding.squeeze(1)
+        # cross_embedding = self.mlp_combined(cross_embedding)
 
-        return cross_embedding
+        return local_combined_embedding
 
     def reconstruct_obs_batch(self, obs_batch, template_structure):
         device = obs_batch.device  # Get the device of obs_batch

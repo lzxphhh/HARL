@@ -32,7 +32,7 @@ class Cross_aware_net(nn.Module):
         self.mlp_all_lane = MLPBase(args, [18 * 6])
         self.mlp_global_combined = MLPBase(args, [10 + 64 * 3])
 
-        self.gat_all_vehs = GAT(nfeat=3, nhid=16, nclass=64, dropout=0.1, alpha=0.2, nheads=3)
+        self.gat_all_vehs = GAT(nfeat=3, nhid=16, nclass=64, dropout=0.1, alpha=0.2, nheads=1)
 
         # cross-aware encoder
         self.cross_attention = CrossAttention(64, 8, 64, 0.1)
