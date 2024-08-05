@@ -54,6 +54,7 @@ class Cross_aware_net(nn.Module):
             'surround_hdv_stats': torch.zeros(6, 6),  # 12
             'surround_cav_stats': torch.zeros(6, 6),  # 13
             'surround_lane_stats': torch.zeros(3, 6),  # 14
+            'vehicle_relation_graph': torch.zeros(self.max_num_CAVs+self.max_num_HDVs, self.max_num_CAVs+self.max_num_HDVs),  # 15
         }
 
     def reconstruct_info(self, obs):
@@ -64,13 +65,15 @@ class Cross_aware_net(nn.Module):
             reconstructed['distance_bott'], reconstructed['distance_end'], \
             reconstructed['executed_action'], reconstructed['generation_action'], \
             reconstructed['surround_hdv_stats'], reconstructed['surround_cav_stats'], \
-            reconstructed['surround_lane_stats']
+            reconstructed['surround_lane_stats'], reconstructed['vehicle_relation_graph']
 
     def forward(self, obs, batch_size=20):
         batch_size = obs.size(0)
         info_current = self.reconstruct_info(obs)
-        self.adj_all_vehs = torch.ones(batch_size, self.max_num_CAVs + self.max_num_HDVs, self.max_num_CAVs + self.max_num_HDVs)
-        self.adj_all_vehs[:, 1:, 1:] = 0
+        # self.adj_all_vehs = torch.ones(batch_size, self.max_num_CAVs + self.max_num_HDVs, self.max_num_CAVs + self.max_num_HDVs)
+        # self.adj_all_vehs[:, 1:, 1:] = 0
+
+        self.adj_all_vehs = info_current[15]
 
         ################################################## global embedding ######################################################
         global_road_info = info_current[4]

@@ -155,13 +155,47 @@ class Hierarchical_state_rep(nn.Module):
         self.action_type = action_type
 
         self.mlp_all_lane = MLPBase(args, [18*6]) # ITSC version
+        self.lane_linear1 = nn.Linear(18*6, 128)
+        self.lane_linear2 = nn.Linear(128, 64)
+        self.relu = nn.ReLU()
+
         self.mlp_surround_lane = MLPBase(args, [3*6])
         self.mlp_bottle_neck = MLPBase(args, [2])
         self.mlp_road_structure = MLPBase(args, [10])
 
-        self.mlp_combined = MLPBase(args, [64*4]) # self.num_HDVs*6+self.num_CAVs*6+
-        self.gat_HDV = GAT(nfeat=3, nhid=16, nclass=64, dropout=0.1, alpha=0.2,nheads=1)
-        self.gat_CAV = GAT(nfeat=3, nhid=16, nclass=64, dropout=0.1, alpha=0.2,nheads=1)
+        self.mlp_combined = MLPBase(args, [64*2+64+10+2+2]) # self.num_HDVs*6+self.num_CAVs*6+
+        self.combine_linear1 = nn.Linear(64*2+64+10+2+2, 128)
+        self.combine_linear2 = nn.Linear(128, 61)
+        self.leaky_relu = nn.LeakyReLU(0.2)
+        self.run_step = 0
+
+        # history feature embedding
+        feature_size = 3
+        GRU_hidden_size = 64
+        dyn_size = 32
+        self.num_env = train_args['train']['n_rollout_threads']
+        num_layers = 1
+        self.hist_encoder = DynamicFeatureExtractor(feature_size, GRU_hidden_size, dyn_size)
+        self.last_hdv_state = torch.zeros(num_layers, self.num_env * self.num_HDVs, GRU_hidden_size, device='cuda')
+        self.last_cav_state = torch.zeros(num_layers, self.num_env * self.num_CAVs, GRU_hidden_size, device='cuda')
+        self.last_ego_state = torch.zeros(num_layers, self.num_env * 1, GRU_hidden_size, device='cuda')
+
+        input_dim = 32  # Example input dimension
+        hidden_dim = 16  # Example hidden dimension
+        output_dim = 2  # Output dimension (e.g., x and y coordinates)
+        num_layers = 2  # Number of LSTM layers
+        self.pre_model = TrajectoryDecoder(input_dim, hidden_dim, output_dim, num_layers)
+
+        nfeat_sur = 6  # Number of input features
+        nhid_sur = 64
+        nclass = 64  # Number of output features
+        nheads = 3  # Number of attention heads
+        self.gat_HDV_surround = GAT(nfeat=nfeat_sur, nhid=nhid_sur, nclass=nclass, dropout=0.6, alpha=0.2,
+                                    nheads=nheads)
+        self.gat_CAV_surround = GAT(nfeat=nfeat_sur, nhid=nhid_sur, nclass=nclass, dropout=0.6, alpha=0.2,
+                                    nheads=nheads)
+        self.gat_HDV = GAT(nfeat=15, nhid=nhid_sur, nclass=nclass, dropout=0.6, alpha=0.2,nheads=nheads)
+        self.gat_CAV = GAT(nfeat=15, nhid=nhid_sur, nclass=nclass, dropout=0.6, alpha=0.2,nheads=nheads)
 
         self.example_extend_history = {
             'history_5': torch.zeros(self.one_step_obs_dim),
@@ -214,96 +248,6 @@ class Hierarchical_state_rep(nn.Module):
 
         return reconstructed['hdv_stats'], reconstructed['cav_stats'], reconstructed['all_lane_stats'], \
             reconstructed['bottle_neck_position'], reconstructed['self_stats']
-    # def forward_new(self, obs, batch_size=20):
-    #     # import time
-    #     # start_time = time.time()
-    #     # obs: (n_rollout_thread, obs_dim)
-    #     history_5, history_4, history_3, history_2, history_1, current = self.reconstruct_history(obs)
-    #
-    #     hdv_stats_hist_5, cav_stats_hist_5, all_lane_stats_5, _, _, _, _, self_stats_hist_5, _, _, exe_action_hist_5, gen_action_hist_5, surround_hdv_hist_5, surround_cav_hist_5, surround_lane_hist_5 = self.reconstruct_info(history_5)
-    #     hdv_stats_hist_4, cav_stats_hist_4, all_lane_stats_4, _, _, _, _, self_stats_hist_4, _, _, exe_action_hist_4, gen_action_hist_4, surround_hdv_hist_4, surround_cav_hist_4, surround_lane_hist_4 = self.reconstruct_info(history_4)
-    #     hdv_stats_hist_3, cav_stats_hist_3, all_lane_stats_3, _, _, _, _, self_stats_hist_3, _, _, exe_action_hist_3, gen_action_hist_3, surround_hdv_hist_3, surround_cav_hist_3, surround_lane_hist_3 = self.reconstruct_info(history_3)
-    #     hdv_stats_hist_2, cav_stats_hist_2, all_lane_stats_2, _, _, _, _, self_stats_hist_2, _, _, exe_action_hist_2, gen_action_hist_2, surround_hdv_hist_2, surround_cav_hist_2, surround_lane_hist_2 = self.reconstruct_info(history_2)
-    #     hdv_stats_hist_1, cav_stats_hist_1, all_lane_stats_1, _, _, _, _, self_stats_hist_1, _, _, exe_action_hist_1, gen_action_hist_1, surround_hdv_hist_1, surround_cav_hist_1, surround_lane_hist_1 = self.reconstruct_info(history_1)
-    #     hdv_stats_current, cav_stats_current, all_lane_stats_0, bottle_neck_0, road_structure_0, road_end_0, target_0, self_stats_current, _, _, exe_action_current, gen_action_current, surround_hdv_current, surround_cav_current, surround_lane_current = self.reconstruct_info(current)
-    #
-    #
-    #     ############################## self_state & surrounding HDVs ##############################
-    #     # Concatenate the focal node to the rest of the nodes
-    #     # ego_stats_current = torch.zeros(batch_size, 1, 3, device='cuda')
-    #     ego_stats_current = torch.cat((self_stats_current[:, :, :3], exe_action_current, gen_action_current), dim=2)
-    #     # ego_stats_hist_5 = torch.cat((self_stats_hist_5[:, :, :3], exe_action_hist_5, gen_action_hist_5), dim=2)
-    #     # ego_stats_hist_4 = torch.cat((self_stats_hist_4[:, :, :3], exe_action_hist_4, gen_action_hist_4), dim=2)
-    #     # ego_stats_hist_3 = torch.cat((self_stats_hist_3[:, :, :3], exe_action_hist_3, gen_action_hist_3), dim=2)
-    #     # ego_stats_hist_2 = torch.cat((self_stats_hist_2[:, :, :3], exe_action_hist_2, gen_action_hist_2), dim=2)
-    #     # ego_stats_hist_1 = torch.cat((self_stats_hist_1[:, :, :3], exe_action_hist_1, gen_action_hist_1), dim=2)
-    #
-    #     # history feature
-    #     # history_hdv_stats = torch.cat((hdv_stats_hist_5, hdv_stats_hist_4, hdv_stats_hist_3, hdv_stats_hist_2, hdv_stats_hist_1), dim=2)
-    #     # history_hdv_stats = torch.cat((hdv_stats_hist_4, hdv_stats_hist_3, hdv_stats_hist_2, hdv_stats_hist_1, hdv_stats_current), dim=2)
-    #     # hist_hdv_stats = history_hdv_stats[:, :self.num_HDVs, :]
-    #     # history_cav_stats = torch.cat((cav_stats_hist_5, cav_stats_hist_4, cav_stats_hist_3, cav_stats_hist_2, cav_stats_hist_1), dim=2)
-    #     # history_cav_stats = torch.cat((cav_stats_hist_4, cav_stats_hist_3, cav_stats_hist_2, cav_stats_hist_1, cav_stats_current), dim=2)
-    #     # hist_cav_stats = history_cav_stats[:, :self.num_CAVs, :]
-    #     # hist_all_vehs = torch.cat((hist_hdv_stats, hist_cav_stats), dim=1)
-    #     # hist_ego_stats = torch.cat((ego_stats_hist_5, ego_stats_hist_4, ego_stats_hist_3, ego_stats_hist_2, ego_stats_hist_1), dim=2)
-    #     # hist_ego_stats = torch.cat((ego_stats_hist_4, ego_stats_hist_3, ego_stats_hist_2, ego_stats_hist_1, ego_stats_current), dim=2)
-    #     # hist_ego_stats = hist_ego_stats.view(hist_ego_stats.shape[0], hist_ego_stats.shape[2])
-    #
-    #     ############################# vehs prediction #############################
-    #     # hdv_dyn_feature = torch.zeros(batch_size, self.num_HDVs, 32, device='cuda')
-    #     # cav_dyn_feature = torch.zeros(batch_size, self.num_CAVs, 32, device='cuda')
-    #     # hdv_pre_feature = torch.zeros(batch_size, self.num_HDVs, 48, device='cuda')
-    #     # cav_pre_feature = torch.zeros(batch_size, self.num_CAVs, 48, device='cuda')
-    #     # hdv_pre_pos = torch.zeros(batch_size, self.num_HDVs, 6, device='cuda')
-    #     # cav_pre_pos = torch.zeros(batch_size, self.num_CAVs, 6, device='cuda')
-    #     # for hdv_id in range(self.num_HDVs):
-    #     #     hist_enc_input = hist_hdv_stats[:, hdv_id, :]
-    #     #     dyn_feature, self.last_hdv_state = self.hist_encoder(hist_enc_input, self.last_hdv_state)
-    #     #     pre_feature, pre_pos = self.pre_model(dyn_feature, 3)
-    #     #     hdv_dyn_feature[:, hdv_id, :] = dyn_feature
-    #     #     hdv_pre_feature[:, hdv_id, :] = pre_feature
-    #     #     hdv_pre_pos[:, hdv_id, :] = pre_pos
-    #     # hdv_pre = hdv_pre_pos.view(hdv_pre_pos.size(0), -1)
-    #     # for cav_id in range(self.num_CAVs):
-    #     #     hist_enc_input = hist_cav_stats[:, cav_id, :]
-    #     #     dyn_feature, self.last_cav_state = self.hist_encoder(hist_enc_input, self.last_cav_state)
-    #     #     cav_dyn_feature[:, cav_id, :] = dyn_feature
-    #     #     pre_feature, pre_pos = self.pre_model(dyn_feature, 3)
-    #     #     cav_pre_feature[:, cav_id, :] = pre_feature
-    #     #     cav_pre_pos[:, cav_id, :] = pre_pos
-    #     # cav_pre = cav_pre_pos.view(cav_pre_pos.size(0), -1)
-    #     # ego_dyn_feature, self.last_ego_state = self.hist_encoder(hist_ego_stats, self.last_ego_state)
-    #     # ego_dyn_feature = ego_dyn_feature.view(ego_dyn_feature.shape[0], 1, ego_dyn_feature.shape[1])
-    #
-    #     ############################## self_state & CAVs & HDVs -- GAT##############################
-    #     self.adj_cav = torch.ones(batch_size, 7, 7, device='cuda')
-    #     self.adj_cav[:, 1:, 1:] = 0
-    #     self.adj_hdv = torch.ones(batch_size, 7, 7, device='cuda')
-    #     self.adj_hdv[:, 1:, 1:] = 0
-    #     combined_self2hdv = torch.cat((ego_stats_current, surround_hdv_current), dim=1)
-    #     self2hdv_relation = self.gat_HDV_surround(combined_self2hdv, self.adj_hdv.to(combined_self2hdv.device))
-    #     combined_self2cav = torch.cat((ego_stats_current, surround_cav_current), dim=1)
-    #     self2cav_relation = self.gat_CAV_surround(combined_self2cav, self.adj_cav.to(combined_self2cav.device))
-    #
-    #     ############################## road_embedding ##############################
-    #     road_embedding = self.mlp_road_structure(road_structure_0)
-    #
-    #     ############################## all_lanes ##############################
-    #     # all_lanes_embedding = self.mlp_all_lane(all_lane_stats_0.view(all_lane_stats_0.size(0), -1))
-    #     all_lanes_embedding = self.lane_linear2(self.relu(self.lane_linear1(all_lane_stats_0.view(all_lane_stats_0.size(0), -1))))
-    #     # Concatenate all the embeddings
-    #     # combined_embedding = torch.cat((hdv_pre, cav_pre, self2hdv_relation, self2cav_relation, all_lanes_embedding, road_structure_0), dim=1)
-    #     exe_action = exe_action_current.view(exe_action_current.size(0), -1)
-    #     gen_action = gen_action_current.view(gen_action_current.size(0), -1)
-    #     combined_embedding = torch.cat((self2hdv_relation, self2cav_relation, all_lanes_embedding, road_structure_0, bottle_neck_0, target_0), dim=1)
-    #     combined_embedding = self.combine_linear2(self.leaky_relu(self.combine_linear1(combined_embedding)))
-    #     combined_embedding = torch.cat((combined_embedding, exe_action, gen_action), dim=1)
-    #
-    #     # end_time = time.time()
-    #     # print('Time taken for hierarchical layer: ', end_time - start_time)
-    #
-    #     return combined_embedding
     def forward(self, obs, batch_size=20):
         # obs: (n_rollout_thread, obs_dim)
         # hdv, cav, all_lane, bottle_neck, self_stats = self.reconstruct(obs)

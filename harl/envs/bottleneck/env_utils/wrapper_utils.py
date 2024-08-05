@@ -1,6 +1,7 @@
 import itertools
 import math
 from typing import List, Dict, Tuple, Union
+import copy
 
 import numpy as np
 
@@ -717,8 +718,26 @@ def compute_hierarchical_ego_vehicle_features(
         bottleneck_position & distance: 1 * 2 + 1
         self_stats: 1 * 13
     """
+    # 建立全局车辆图关系
+    vehicle_order = {'CAV_0': 0, 'CAV_1': 1, 'CAV_2': 2, 'CAV_3': 3, 'CAV_4': 4, 'CAV_5': 5, 'CAV_6': 6, 'CAV_7': 7,
+                     'CAV_8': 8,
+                     'CAV_9': 9, 'CAV_10': 10, 'CAV_11': 11, 'CAV_12': 12, 'CAV_13': 13, 'CAV_14': 14, 'CAV_15': 15,
+                     'HDV_0': 16, 'HDV_1': 17, 'HDV_2': 18, 'HDV_3': 19, 'HDV_4': 20, 'HDV_5': 21, 'HDV_6': 22,
+                     'HDV_7': 23,
+                     'HDV_8': 24, 'HDV_9': 25, 'HDV_10': 26, 'HDV_11': 27, 'HDV_12': 28, 'HDV_13': 29, 'HDV_14': 30,
+                     'HDV_15': 31,
+                     'HDV_16': 32, 'HDV_17': 33, 'HDV_18': 34, 'HDV_19': 35, 'HDV_20': 36, 'HDV_21': 37, 'HDV_22': 38,
+                     'HDV_23': 39}
+
+    vehicle_relation_graph = np.zeros((self.max_num_CAVs + self.max_num_HDVs, self.max_num_CAVs + self.max_num_HDVs))
     # ############################## 所有HDV的信息 ############################## 13
     hdv_stats = {}
+    surround_modes = {
+        'left_followers': 0b000,  # Left and followers
+        'right_followers': 0b001,  # Left and leaders
+        'left_leaders': 0b010,  # Right and followers
+        'right_leaders': 0b011  # Right and leaders
+    }
     for hdv_id, hdv_info in hdv_statistics.items():
         speed, position, heading, road_id, lane_index = hdv_info
         # 速度归一化  - 1
@@ -739,6 +758,21 @@ def compute_hierarchical_ego_vehicle_features(
         hdv_stats[hdv_id] = [normalized_speed, normalized_position_x, normalized_position_y, -1, -1, -1]
         # hdv_stats[hdv_id] = [normalized_speed, normalized_position_x, normalized_position_y,
         #                      normalized_heading] + road_id_one_hot + lane_index_one_hot
+        if self.use_gui:
+            import traci as traci
+        else:
+            import libsumo as traci
+        for key, mode in surround_modes.items():
+            neighbors = traci.vehicle.getNeighbors(hdv_id, mode)
+            if neighbors and neighbors[0][0] in vehicle_order:
+                vehicle_relation_graph[vehicle_order[hdv_id], vehicle_order[neighbors[0][0]]] = 1
+                vehicle_relation_graph[vehicle_order[neighbors[0][0]], vehicle_order[hdv_id]] = 1
+        front_vehicle = traci.vehicle.getLeader(hdv_id)
+        if front_vehicle and front_vehicle[0] in vehicle_order:
+            vehicle_relation_graph[vehicle_order[hdv_id], vehicle_order[front_vehicle[0]]] = 1
+        following_vehicle = traci.vehicle.getFollower(hdv_id)
+        if following_vehicle and following_vehicle[0] in vehicle_order:
+            vehicle_relation_graph[vehicle_order[following_vehicle[0]], vehicle_order[hdv_id]] = 1
     # convert to 2D array (24 * 3)  - 24 is max number of HDVs
     for i in range(self.max_num_HDVs):
         if 'HDV_'+str(i) not in hdv_stats:
@@ -782,6 +816,8 @@ def compute_hierarchical_ego_vehicle_features(
                 surround_hdv_stats[ego_id].append([relat_x/700, relat_y, relat_v/15, -1, -1, -1])
             elif statistics[0][:3] == 'CAV':
                 surround_cav_stats[ego_id].append([relat_x/700, relat_y, relat_v/15, self.action_generation['hist_1'][statistics[0]], self.action_execution['hist_1'][statistics[0]][0], self.action_execution['hist_1'][statistics[0]][1]/15])
+            vehicle_relation_graph[vehicle_order[ego_id], vehicle_order[statistics[0]]] = 1
+            vehicle_relation_graph[vehicle_order[statistics[0]], vehicle_order[ego_id]] = 1
 
         # cav_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed,
         #                      normalized_heading] + road_id_one_hot + lane_index_one_hot
@@ -888,7 +924,8 @@ def compute_hierarchical_ego_vehicle_features(
         feature_vectors_current[ego_id]['right_lane_stats'] = right_lane_stats[ego_id]
 
         # shared_feature_vectors[ego_id] = feature_vector.copy()  # EP mode
-        shared_feature_vectors[ego_id] = feature_vectors_current[ego_id]  # FP mode
+        shared_feature_vectors[ego_id] = copy.deepcopy(feature_vectors_current[ego_id])  # FP mode
+        shared_feature_vectors[ego_id]['veh_relation'] = vehicle_relation_graph
 
     # A function to flatten a dictionary structure into 1D array
     def flatten_to_1d(data_dict):

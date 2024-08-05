@@ -6,7 +6,7 @@ import math
 
 def generate_scenario(
         aggressive, cautious, normal,
-        use_gui: bool, sce_name: str, CAV_num: int, CAV_penetration: float, distribution: str):
+        use_gui: bool, sce_name: str, CAV_num: int, HDV_num: int, CAV_penetration: float, distribution: str):
     """
     Mixed Traffic Flow (MTF) scenario generation: v_0 = 10 m/s, v_max = 15 m/s
     use_gui: false for libsumo, true for traci
@@ -21,8 +21,11 @@ def generate_scenario(
     --- HDV_2: normal, 0.6 probability
     distribution: "random" or "uniform"
     """
-    veh_num = math.ceil(CAV_num / CAV_penetration)
-    HDV_num = veh_num - CAV_num
+    # veh_num = math.ceil(CAV_num / CAV_penetration)
+    # HDV_num = veh_num - CAV_num
+    dis_veh = 25
+    veh_start = 250
+    veh_num = CAV_num + HDV_num
     # generate HDVs with different driving behaviors
     random_numbers_HDV = [random.random() for _ in range(HDV_num)]
     random_HDVs = []
@@ -95,13 +98,13 @@ def generate_scenario(
             pos_change = -7+3*random.random() if i_all % 4 == 1 else 5+3*random.random()
             pos_change = 10+3*random.random() if i_all % 4 == 2 else pos_change
             pos_change = -2+3*random.random() if i_all % 4 == 0 else pos_change
-            if distribution[i_all % 10] == 1:
+            if distribution[i_all % 10] == 1 and i_CAV < CAV_num:
                 scene_change.add(
                     vehID=f'CAV_{i_CAV}',
                     typeID='ego',
                     routeID=f'route_{int(random_route_CAVs[i_CAV])}',
                     depart="now",
-                    departPos=f'{float(250 - i_all / 4 * 25 + pos_change)}',
+                    departPos=f'{float(veh_start - i_all / 4 * dis_veh + pos_change)}',
                     departLane=f'{int(i_all % 4)}',
                     departSpeed='10',
                 )
@@ -112,7 +115,7 @@ def generate_scenario(
                     typeID=f'HDV_{int(random_HDVs[i_HDV])}',
                     routeID=f'route_{int(random_route_HDVs[i_HDV])}',
                     depart="now",
-                    departPos=f'{float(250 - i_all / 4 * 25 + pos_change)}',
+                    departPos=f'{float(veh_start - i_all / 4 * dis_veh + pos_change)}',
                     departLane=f'{int(i_all % 4)}',
                     departSpeed='10',
                 )
