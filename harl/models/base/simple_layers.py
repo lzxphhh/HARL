@@ -224,3 +224,88 @@ class MLP_improve(nn.Module):
         for layer in self.layers:
             x = layer(x)
         return x
+
+class MultiVeh_GraphAttentionLayer(nn.Module):
+    def __init__(self, in_features, out_features, dropout, alpha, concat=True):
+        super(MultiVeh_GraphAttentionLayer, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.alpha = alpha
+        self.concat = concat
+
+        self.W = nn.Parameter(torch.empty(size=(in_features, out_features)))
+        nn.init.xavier_uniform_(self.W.data, gain=1.414)
+        self.a = nn.Parameter(torch.empty(size=(2 * out_features, 1)))
+        nn.init.xavier_uniform_(self.a.data, gain=1.414)
+
+        self.leakyrelu = nn.LeakyReLU(self.alpha)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, h, adj):
+        Wh = torch.matmul(h, self.W)  # h.shape: (batch_size, num_veh, in_features), Wh.shape: (batch_size, num_veh, out_features)
+        batch_size, num_veh, _ = Wh.size()
+
+        a_input = torch.cat([Wh.repeat(1, 1, num_veh).view(batch_size, num_veh * num_veh, -1),
+                             Wh.repeat(1, num_veh, 1)], dim=2).view(batch_size, num_veh, num_veh, 2 * self.out_features)
+        e = self.leakyrelu(torch.matmul(a_input, self.a).squeeze(3))
+
+        zero_vec = -9e15 * torch.ones_like(e)
+        attention = torch.where(adj > 0, e, zero_vec)
+        attention = F.softmax(attention, dim=2)
+        attention = self.dropout(attention)
+
+        h_prime = torch.matmul(attention, Wh)
+
+        if self.concat:
+            return F.elu(h_prime)
+        else:
+            return h_prime
+
+class MultiVeh_GAT(nn.Module):
+    def __init__(self, nfeat, nhid, nclass, dropout=0.6, alpha=0.2, nheads=1):
+        super(MultiVeh_GAT, self).__init__()
+        self.dropout = dropout
+
+        # Multi-head attention layers
+        self.attentions = nn.ModuleList([
+            MultiVeh_GraphAttentionLayer(nfeat, nhid, dropout=dropout, alpha=alpha)
+            for _ in range(nheads)
+        ])
+
+        # Output linear layer
+        self.out_att = MultiVeh_GraphAttentionLayer(nhid * nheads, nclass, dropout=dropout, alpha=alpha, concat=False)
+
+    def forward(self, x, adj):
+        x = F.dropout(x, self.dropout, training=self.training)
+        x = torch.cat([att(x, adj) for att in self.attentions], dim=2)
+        x = F.dropout(x, self.dropout, training=self.training)
+        x = self.out_att(x, adj)
+        return x
+
+class TrajectoryDecoder(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers=1):
+        super(TrajectoryDecoder, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+
+        # LSTM layer
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
+
+        # Linear layer to predict future states
+        self.fc = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, encoded_features, future_steps=3):
+        # Initialize hidden state and cell state
+        h0 = torch.zeros(self.num_layers, encoded_features.size(0), self.hidden_dim).to(encoded_features.device)
+        c0 = torch.zeros(self.num_layers, encoded_features.size(0), self.hidden_dim).to(encoded_features.device)
+
+        # Repeat encoded features for each future step
+        lstm_input = encoded_features.unsqueeze(1).repeat(1, future_steps, 1)
+
+        # LSTM forward pass
+        lstm_out, _ = self.lstm(lstm_input, (h0, c0))
+
+        # Predict future states
+        output = self.fc(lstm_out)
+
+        return output

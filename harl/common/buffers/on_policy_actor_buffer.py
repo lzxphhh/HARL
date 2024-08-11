@@ -76,6 +76,15 @@ class OnPolicyActorBuffer:
             (self.episode_length, self.n_rollout_threads, act_shape), dtype=np.float32
         )
 
+        # Buffer for prediction errors of this actor.
+        self.prediction_errors = np.zeros(
+            (self.episode_length, self.n_rollout_threads, 1), dtype=np.float32
+        )
+        # Buffer for action loss of this actor.
+        self.action_losss = np.zeros(
+            (self.episode_length, self.n_rollout_threads, 1), dtype=np.float32
+        )
+
         # Buffer for masks of this actor. Masks denotes at which point should the rnn states be reset.
         # 当前这个agent在不同并行环境的不同时间点是否done，如果done，那么就需要reset rnn
         self.masks = np.ones((self.episode_length + 1, self.n_rollout_threads, 1), dtype=np.float32)
@@ -101,6 +110,8 @@ class OnPolicyActorBuffer:
         rnn_states,
         actions,
         action_log_probs,
+        prediction_errors,
+        action_losss,
         masks,
         active_masks=None,
         available_actions=None,
@@ -110,6 +121,8 @@ class OnPolicyActorBuffer:
         self.rnn_states[self.step + 1] = rnn_states.copy()
         self.actions[self.step] = actions.copy()
         self.action_log_probs[self.step] = action_log_probs.copy()
+        self.prediction_errors[self.step] = prediction_errors.copy()
+        self.action_losss[self.step] = action_losss.copy()
         self.masks[self.step + 1] = masks.copy()
         if active_masks is not None:
             self.active_masks[self.step + 1] = active_masks.copy()
@@ -277,6 +290,8 @@ class OnPolicyActorBuffer:
             obs = _sa_cast(self.obs[:-1])
         actions = _sa_cast(self.actions)
         action_log_probs = _sa_cast(self.action_log_probs)
+        prediction_errors = _sa_cast(self.prediction_errors)
+        action_losss = _sa_cast(self.action_losss)
         advantages = _sa_cast(advantages)
         masks = _sa_cast(self.masks[:-1])
         active_masks = _sa_cast(self.active_masks[:-1])
@@ -294,6 +309,8 @@ class OnPolicyActorBuffer:
             rnn_states_batch = []
             actions_batch = []
             available_actions_batch = []
+            prediction_errors_batch = []
+            action_losss_batch = []
             masks_batch = []
             active_masks_batch = []
             old_action_log_probs_batch = []
@@ -304,6 +321,8 @@ class OnPolicyActorBuffer:
                 ind = index * data_chunk_length
                 obs_batch.append(obs[ind : ind + data_chunk_length])
                 actions_batch.append(actions[ind : ind + data_chunk_length])
+                prediction_errors_batch.append(prediction_errors[ind : ind + data_chunk_length])
+                action_losss_batch.append(action_losss[ind : ind + data_chunk_length])
                 if self.available_actions is not None:
                     available_actions_batch.append(available_actions[ind : ind + data_chunk_length])
                 masks_batch.append(masks[ind : ind + data_chunk_length])
@@ -318,6 +337,8 @@ class OnPolicyActorBuffer:
             # These are all ndarrays of size (data_chunk_length, mini_batch_size, *dim)
             obs_batch = np.stack(obs_batch, axis=1)
             actions_batch = np.stack(actions_batch, axis=1)
+            prediction_errors_batch = np.stack(prediction_errors_batch, axis=1)
+            action_losss_batch = np.stack(action_losss_batch, axis=1)
             if self.available_actions is not None:
                 available_actions_batch = np.stack(available_actions_batch, axis=1)
             if self.factor is not None:
@@ -332,6 +353,8 @@ class OnPolicyActorBuffer:
             # flatten the (data_chunk_length, mini_batch_size, *dim) ndarrays to (data_chunk_length * mini_batch_size, *dim)
             obs_batch = _flatten(L, N, obs_batch)
             actions_batch = _flatten(L, N, actions_batch)
+            prediction_errors_batch = _flatten(L, N, prediction_errors_batch)
+            action_losss_batch = _flatten(L, N, action_losss_batch)
             if self.available_actions is not None:
                 available_actions_batch = _flatten(L, N, available_actions_batch)
             else:
@@ -346,4 +369,4 @@ class OnPolicyActorBuffer:
                 # 注意以下这里的factor - happo
                 yield obs_batch, rnn_states_batch, actions_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, adv_targ, available_actions_batch, factor_batch
             else:
-                yield obs_batch, rnn_states_batch, actions_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, adv_targ, available_actions_batch
+                yield obs_batch, rnn_states_batch, actions_batch, prediction_errors_batch, action_losss_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, adv_targ, available_actions_batch

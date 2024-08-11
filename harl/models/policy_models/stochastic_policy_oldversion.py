@@ -7,14 +7,11 @@ from harl.models.base.self_attention_multi_head import Encoder  # multi head sel
 from harl.models.base.hierarchical_state_rep import Hierarchical_state_rep
 from harl.models.base.prediction_rep import Prediction_rep
 from harl.models.base.cross_aware_rep import Cross_aware_rep
-from harl.models.base.TIE_rep import TIE_rep
-from harl.models.base.prediction import Prediction
 from harl.models.base.rnn import RNNLayer
 from harl.models.base.act import ACTLayer
 from harl.utils.envs_tools import get_shape_from_obs_space
 import yaml
 import copy
-import time
 
 class StochasticPolicy(nn.Module):
     """Stochastic policy model. Outputs actions given observations."""
@@ -30,7 +27,7 @@ class StochasticPolicy(nn.Module):
         super(StochasticPolicy, self).__init__()
         # Load the environment arguments
         env_args = yaml.load(
-            open('/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/harl/configs/envs_cfgs/bottleneck_attack.yaml',
+            open('/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/harl/configs/envs_cfgs/bottleneck.yaml',
                  'r'),
             Loader=yaml.FullLoader)
         self.env_args = copy.deepcopy(env_args)
@@ -54,9 +51,7 @@ class StochasticPolicy(nn.Module):
         self.base = base(args, obs_shape)
         self.attention = Encoder(obs_shape[0], action_space.n, 1, self.hidden_sizes[-1], 4, 'Discrete')
         self.hierarchical = Hierarchical_state_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
-        self.tie_rep = TIE_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
-        self.prediction = Prediction(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
-        # self.prediction = Prediction_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
+        self.prediction = Prediction_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
         self.cross_aware = Cross_aware_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
         self.num_CAVs = self.env_args['num_CAVs']
         self.num_HDVs = self.env_args['num_HDVs']
@@ -69,7 +64,7 @@ class StochasticPolicy(nn.Module):
             for i in range(3):
                 self.prediction_output[f'hist_{i + 1}'] = {veh_id: {pre_id:[] for pre_id in self.veh_ids} for veh_id in self.CAV_ids}
                 self.prediction_error[f'hist_{i + 1}'] = {veh_id: {pre_id:[] for pre_id in self.veh_ids} for veh_id in self.CAV_ids}
-        # 如果使用RNN，初始化RNN层
+        # 如果使用RNN，初始化RNN层 #TODO: 暂时还没看
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             self.rnn = RNNLayer(
                 self.hidden_sizes[-1],
@@ -116,12 +111,68 @@ class StochasticPolicy(nn.Module):
         env_num = obs.size(0)
         if self.strategy == 'base':
             actor_features = self.base(obs)
+            prediction_error_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
         elif self.strategy == 'attention':
             actor_features = self.attention(obs)
+            prediction_error_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
         elif self.strategy == 'hierarchical':
             actor_features = self.hierarchical(obs, batch_size=obs.size(0))
+            prediction_error_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
         elif self.strategy == 'prediction':
-            actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
+            actor_features, future_states, ego_id, prediction_groundtruth = self.prediction(obs, batch_size=obs.size(0))
+            prediction_error_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
+            if ego_id:
+                prediction_mse_error = {key: torch.zeros(env_num, 1, device=self.tpdv['device']) for key in self.veh_ids}
+                prediction_mae_error = {key: torch.zeros(env_num, 1, device=self.tpdv['device']) for key in self.veh_ids}
+                if len(ego_id) > 10:
+                    print('ego_id:', ego_id)
+                for veh_id in self.veh_ids:
+                    if self.prediction_output['hist_1'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
+                        valid_indices = self.prediction_output['hist_1'][ego_id][veh_id][:, 0, 0] != 0
+                        if valid_indices.any():
+                            self.prediction_error['hist_1'][ego_id][veh_id] = self.prediction_output['hist_1'][ego_id][veh_id][valid_indices, 0, :] - prediction_groundtruth[veh_id][valid_indices, :]
+                            prediction_mse_error[veh_id][valid_indices] = torch.mean(
+                                torch.pow(self.prediction_error['hist_1'][ego_id][veh_id], 2), dim=1, keepdim=True)
+                            prediction_mae_error[veh_id][valid_indices] = torch.mean(
+                                torch.abs(self.prediction_error['hist_1'][ego_id][veh_id]), dim=1, keepdim=True)
+                    else:
+                        self.prediction_error['hist_1'][ego_id][veh_id] = []
+                    if self.prediction_output['hist_2'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
+                        valid_indices = self.prediction_output['hist_2'][ego_id][veh_id][:, 1, 0] != 0
+                        if valid_indices.any():
+                            self.prediction_error['hist_2'][ego_id][veh_id] = self.prediction_output['hist_2'][ego_id][veh_id][valid_indices, 1, :] - prediction_groundtruth[veh_id][valid_indices, :]
+                            prediction_mse_error[veh_id][valid_indices] = torch.mean(
+                                torch.pow(self.prediction_error['hist_2'][ego_id][veh_id], 2), dim=1, keepdim=True)
+                            prediction_mae_error[veh_id][valid_indices] = torch.mean(
+                                torch.abs(self.prediction_error['hist_2'][ego_id][veh_id]), dim=1, keepdim=True)
+                    else:
+                        self.prediction_error['hist_2'][ego_id][veh_id] = []
+                    if self.prediction_output['hist_3'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
+                        valid_indices = self.prediction_output['hist_3'][ego_id][veh_id][:, 2, 0] != 0
+                        if valid_indices.any():
+                            self.prediction_error['hist_3'][ego_id][veh_id] = self.prediction_output['hist_3'][ego_id][veh_id][valid_indices, 2, :] - prediction_groundtruth[veh_id][valid_indices, :]
+                            prediction_mse_error[veh_id][valid_indices] = torch.mean(
+                                torch.pow(self.prediction_error['hist_3'][ego_id][veh_id], 2), dim=1, keepdim=True)
+                            prediction_mae_error[veh_id][valid_indices] = torch.mean(
+                                torch.abs(self.prediction_error['hist_3'][ego_id][veh_id]), dim=1, keepdim=True)
+                    else:
+                        self.prediction_error['hist_3'][ego_id][veh_id] = []
+                for i in range(env_num):
+                    error_cumulative = 0
+                    veh_count = 0
+                    for veh_id in self.veh_ids:
+                        if prediction_mse_error[veh_id][i, 0] != 0 and veh_id != ego_id:
+                            error_cumulative += prediction_mae_error[veh_id][i, 0]   # prediction_mse_error
+                            veh_count += 1
+                    if veh_count != 0:
+                        prediction_error_output[i, 0] = error_cumulative / veh_count
+                    else:
+                        prediction_error_output[i, 0] = 0
+                self.prediction_output['hist_3'][ego_id] = self.prediction_output['hist_2'][ego_id]
+                self.prediction_output['hist_2'][ego_id] = self.prediction_output['hist_1'][ego_id]
+                self.prediction_output['hist_1'][ego_id] = future_states
+
+
         elif self.strategy == 'cross_aware':
             actor_features = self.cross_aware(obs, batch_size=obs.size(0))
 
@@ -134,65 +185,9 @@ class StochasticPolicy(nn.Module):
             actor_features, available_actions, deterministic
         )
 
+        #  TODO: 得到actions后进入prediction_rep中 得到预测的输出 然后计算mse和mae 计算loss--world model的思路
 
-        prediction_error_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
-        action_loss_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
-        if self.strategy == 'prediction':
-            future_states, ego_id, prediction_groundtruth = self.prediction(reconstruct_info, actions, batch_size=obs.size(0))
-            prediction_error_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
-            if ego_id:
-                # prediction_mse_error = {key: torch.zeros(env_num, 1, device=self.tpdv['device']) for key in self.veh_ids}
-                prediction_mae_error = {key: torch.zeros(env_num, 1, device=self.tpdv['device']) for key in self.veh_ids}
-                if len(ego_id) > 10:
-                    print('ego_id:', ego_id)
-                for veh_id in self.veh_ids:
-                    if self.prediction_output['hist_1'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
-                        self.prediction_error['hist_1'][ego_id][veh_id] = self.prediction_output['hist_1'][ego_id][veh_id][:, 0, :] - \
-                                                                          prediction_groundtruth[veh_id][:, :] if self.prediction_output['hist_1'][ego_id][veh_id][:, 0, :] != [0, 0, 0] else [0, 0, 0]
-                        # prediction_mse_error[veh_id] = torch.mean(torch.pow(self.prediction_error['hist_1'][ego_id][veh_id], 2), dim=1, keepdim=True)
-                        prediction_mae_error[veh_id] = torch.mean(torch.abs(self.prediction_error['hist_1'][ego_id][veh_id]), dim=1, keepdim=True)
-                    else:
-                        self.prediction_error['hist_1'][ego_id][veh_id] = []
-                    if self.prediction_output['hist_2'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
-                        self.prediction_error['hist_2'][ego_id][veh_id] = self.prediction_output['hist_2'][ego_id][veh_id][:, 1, :] - \
-                                                                          prediction_groundtruth[veh_id][:, :] if self.prediction_output['hist_2'][ego_id][veh_id][:, 1, :] != [0, 0, 0] else [0, 0, 0]
-                        # prediction_mse_error[veh_id] = torch.mean(torch.pow(self.prediction_error['hist_2'][ego_id][veh_id], 2), dim=1, keepdim=True)
-                        prediction_mae_error[veh_id] = torch.mean(torch.abs(self.prediction_error['hist_2'][ego_id][veh_id]), dim=1, keepdim=True)
-                    else:
-                        self.prediction_error['hist_2'][ego_id][veh_id] = []
-                    if self.prediction_output['hist_3'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
-                        self.prediction_error['hist_3'][ego_id][veh_id] = self.prediction_output['hist_3'][ego_id][veh_id][:, 2, :] - \
-                                                                          prediction_groundtruth[veh_id][:, :] if self.prediction_output['hist_3'][ego_id][veh_id][:, 2, :] != [0, 0, 0] else [0, 0, 0]
-                        # prediction_mse_error[veh_id] = torch.mean(torch.pow(self.prediction_error['hist_3'][ego_id][veh_id], 2), dim=1, keepdim=True)
-                        prediction_mae_error[veh_id] = torch.mean(torch.abs(self.prediction_error['hist_3'][ego_id][veh_id]), dim=1, keepdim=True)
-                    else:
-                        self.prediction_error['hist_3'][ego_id][veh_id] = []
-
-                for i in range(env_num):
-                    error_cumulative = 0
-                    veh_count = 0
-                    for veh_id in self.veh_ids:
-                        if prediction_mae_error[veh_id][i, 0] != 0 and veh_id != ego_id:
-                            error_cumulative += prediction_mae_error[veh_id][i, 0]  # prediction_mse_error
-                            veh_count += 1
-                    if veh_count != 0:
-                        prediction_error_output[i, 0] = error_cumulative / veh_count
-                    else:
-                        prediction_error_output[i, 0] = 0
-                self.prediction_output['hist_3'][ego_id] = self.prediction_output['hist_2'][ego_id]
-                self.prediction_output['hist_2'][ego_id] = self.prediction_output['hist_1'][ego_id]
-                self.prediction_output['hist_1'][ego_id] = future_states
-
-            last_actor_action = reconstruct_info[7]
-            last_actual_action = reconstruct_info[8]
-            action_mse_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
-            action_cosine_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
-            action_mse_loss[:, 0] = torch.mean((last_actor_action[:, 0, 0] - last_actual_action[:, 0, 0]) ** 2)
-            action_cosine_loss[:, 0] = 1 - torch.nn.functional.cosine_similarity(last_actor_action[:, 0, 0], last_actual_action[:, 0, 0], dim=-1).mean()
-            action_loss_output[:, 0] = action_mse_loss[:, 0]
-
-
-        return actions, action_log_probs, rnn_states, prediction_error_output, action_loss_output
+        return actions, action_log_probs, rnn_states, prediction_error_output
 
     def evaluate_actions(
             self, obs, rnn_states, action, masks, available_actions=None, active_masks=None
@@ -232,7 +227,7 @@ class StochasticPolicy(nn.Module):
         elif self.strategy == 'hierarchical':
             actor_features = self.hierarchical(obs, batch_size=obs.size(0))
         elif self.strategy == 'prediction':
-            actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
+            actor_features, future_states, ego_id, prediction_groundtruth = self.prediction(obs, batch_size=obs.size(0))
         elif self.strategy == 'cross_aware':
             actor_features = self.cross_aware(obs, batch_size=obs.size(0))
 

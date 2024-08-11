@@ -50,6 +50,8 @@ class MAPPO(OnPolicyBase):
             obs_batch,
             rnn_states_batch,
             actions_batch,
+            prediction_errors_batch,
+            action_losss_batch,
             masks_batch,
             active_masks_batch,
             old_action_log_probs_batch,
@@ -98,9 +100,29 @@ class MAPPO(OnPolicyBase):
 
         self.actor_optimizer.zero_grad()
 
-        # policy entropy
-        (policy_loss - dist_entropy * self.entropy_coef).backward()
+        # policy entropy -- original code
+        # (policy_loss - dist_entropy * self.entropy_coef).backward()
         # policy_loss.backward()
+
+        # add prediction loss
+        entropy_loss = policy_loss - dist_entropy * self.entropy_coef
+        prediction_loss = np.mean(prediction_errors_batch)
+        action_loss = np.mean(action_losss_batch)
+        # dynamic weight of each loss
+        weight_prediction_loss = 0
+        weight_action_loss = 0
+        n_prediction_loss = self.args["prediction_loss_subzone"]
+        w_prediction_loss = self.args["prediction_loss_weight"]
+        for i in range(len(n_prediction_loss)):
+            if prediction_loss > n_prediction_loss[i]:
+                weight_prediction_loss = w_prediction_loss[i]
+        n_action_loss = self.args["action_loss_subzone"]
+        w_action_loss = self.args["action_loss_weight"]
+        for i in range(len(n_action_loss)):
+            if action_loss > n_action_loss[i]:
+                weight_action_loss = w_action_loss[i]
+        combined_loss = weight_prediction_loss * prediction_loss + weight_action_loss * action_loss + entropy_loss
+        combined_loss.backward()
 
         if self.use_max_grad_norm:
             actor_grad_norm = nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
@@ -109,7 +131,7 @@ class MAPPO(OnPolicyBase):
 
         self.actor_optimizer.step()
 
-        return policy_loss, dist_entropy, actor_grad_norm, imp_weights
+        return policy_loss, entropy_loss, prediction_loss, action_loss, combined_loss, dist_entropy, actor_grad_norm, imp_weights
 
     def train(self, actor_buffer, advantages, state_type):
         """Perform a training update for non-parameter-sharing MAPPO using minibatch GD.
@@ -122,6 +144,10 @@ class MAPPO(OnPolicyBase):
         """
         train_info = {}
         train_info["policy_loss"] = 0
+        train_info["entropy_loss"] = 0
+        train_info["prediction_loss"] = 0
+        train_info["action_loss"] = 0
+        train_info["combined_loss"] = 0
         train_info["dist_entropy"] = 0
         train_info["actor_grad_norm"] = 0
         train_info["ratio"] = 0
@@ -159,9 +185,13 @@ class MAPPO(OnPolicyBase):
             # sample出每一个batch的数据
             for sample in data_generator:
                 # 计算actor的loss并且更新
-                policy_loss, dist_entropy, actor_grad_norm, imp_weights = self.update(sample)
+                policy_loss, entropy_loss, prediction_loss, action_loss, combined_loss, dist_entropy, actor_grad_norm, imp_weights  = self.update(sample)
 
                 train_info["policy_loss"] += policy_loss.item()
+                train_info["entropy_loss"] += entropy_loss.item()
+                train_info["prediction_loss"] += prediction_loss.item()
+                train_info["action_loss"] += action_loss.item()
+                train_info["combined_loss"] += combined_loss.item()
                 train_info["dist_entropy"] += dist_entropy.item()
                 train_info["actor_grad_norm"] += actor_grad_norm
                 train_info["ratio"] += imp_weights.mean()
@@ -187,6 +217,10 @@ class MAPPO(OnPolicyBase):
         """
         train_info = {}
         train_info["policy_loss"] = 0
+        train_info["entropy_loss"] = 0
+        train_info["prediction_loss"] = 0
+        train_info["action_loss"] = 0
+        train_info["combined_loss"] = 0
         train_info["dist_entropy"] = 0
         train_info["actor_grad_norm"] = 0
         train_info["ratio"] = 0
@@ -234,22 +268,26 @@ class MAPPO(OnPolicyBase):
                 data_generators.append(data_generator)
 
             for _ in range(self.actor_num_mini_batch):
-                batches = [[] for _ in range(8)]
+                batches = [[] for _ in range(10)]
                 for generator in data_generators:
                     sample = next(generator)
-                    for i in range(8):
+                    for i in range(10):
                         batches[i].append(sample[i])
-                for i in range(7):
+                for i in range(9):
                     batches[i] = np.concatenate(batches[i], axis=0)
-                if batches[7][0] is None:
-                    batches[7] = None
+                if batches[9][0] is None:
+                    batches[9] = None
                 else:
-                    batches[7] = np.concatenate(batches[7], axis=0)
-                policy_loss, dist_entropy, actor_grad_norm, imp_weights = self.update(
+                    batches[9] = np.concatenate(batches[9], axis=0)
+                policy_loss, entropy_loss, prediction_loss, action_loss, combined_loss, dist_entropy, actor_grad_norm, imp_weights = self.update(
                     tuple(batches)
                 )
 
                 train_info["policy_loss"] += policy_loss.item()
+                train_info["entropy_loss"] += entropy_loss.item()
+                train_info["prediction_loss"] += prediction_loss.item()
+                train_info["action_loss"] += action_loss.item()
+                train_info["combined_loss"] += combined_loss.item()
                 train_info["dist_entropy"] += dist_entropy.item()
                 train_info["actor_grad_norm"] += actor_grad_norm
                 train_info["ratio"] += imp_weights.mean()

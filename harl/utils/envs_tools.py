@@ -99,6 +99,11 @@ def make_train_env(env_name, seed, n_threads, env_args):
                 from harl.envs.bottleneck.bottleneck_env import BOTTLENECKEnv
 
                 env = BOTTLENECKEnv(env_args)
+
+            elif env_name == "bottleneck_attack":
+                from harl.envs.bottleneck_attack.bottleneck_env import BOTTLENECKEnv
+
+                env = BOTTLENECKEnv(env_args)
             else:
                 print("Can not support the " + env_name + "environment.")
                 raise NotImplementedError
@@ -155,6 +160,11 @@ def make_eval_env(env_name, seed, n_threads, env_args):
                 env = LAGEnv(env_args)
             elif env_name == "bottleneck":
                 from harl.envs.bottleneck.bottleneck_env import BOTTLENECKEnv
+
+                env = BOTTLENECKEnv(env_args)
+
+            elif env_name == "bottleneck_attack":
+                from harl.envs.bottleneck_attack.bottleneck_env import BOTTLENECKEnv
 
                 env = BOTTLENECKEnv(env_args)
             else:
@@ -237,6 +247,11 @@ def make_render_env(env_name, seed, env_args):
         manual_render = False  # football renders automatically
 
         env.seed(seed * 60000)
+    elif env_name == "bottleneck_attack":
+        from harl.envs.bottleneck_attack.bottleneck_env import BOTTLENECKEnv
+
+        env = BOTTLENECKEnv(env_args)
+        manual_render = False
     else:
         print("Can not support the " + env_name + "environment.")
         raise NotImplementedError
@@ -276,4 +291,6 @@ def get_num_agents(env, env_args, envs):
     elif env == "lag":
         return envs.n_agents
     elif env == "bottleneck":
+        return envs.n_agents
+    elif env == "bottleneck_attack":
         return envs.n_agents

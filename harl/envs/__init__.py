@@ -8,6 +8,7 @@ from harl.envs.football.football_logger import FootballLogger
 from harl.envs.dexhands.dexhands_logger import DexHandsLogger
 from harl.envs.lag.lag_logger import LAGLogger
 from harl.envs.bottleneck.bottleneck_logger import BottleneckLogger
+from harl.envs.bottleneck_attack.bottleneck_attack_logger import BottleneckAttackLogger
 
 FLAGS = flags.FLAGS
 FLAGS(["train_sc.py"])
@@ -22,4 +23,5 @@ LOGGER_REGISTRY = {
     "smacv2": SMACv2Logger,
     "lag": LAGLogger,
     "bottleneck": BottleneckLogger,
+    "bottleneck_attack": BottleneckAttackLogger,
 }

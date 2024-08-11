@@ -283,6 +283,8 @@ class OnPolicyBaseRunner:
                     action_log_probs,
                     rnn_states,  # rnn_states是actor的rnn的hidden state
                     rnn_states_critic,  # rnn_states_critic是critic的rnn的hidden state
+                    prediction_errors,
+                    action_losss,
                 ) = self.collect(step)
 
                 """
@@ -322,6 +324,8 @@ class OnPolicyBaseRunner:
                     action_log_probs,
                     rnn_states,
                     rnn_states_critic,
+                    prediction_errors,
+                    action_losss,
                 )
 
                 self.logger.per_step(data)  # logger callback at each step
@@ -416,6 +420,8 @@ class OnPolicyBaseRunner:
         action_collector = []
         action_log_prob_collector = []
         rnn_state_collector = []
+        prediction_error_collector = []
+        action_loss_collector = []
 
         # 从critic中收集values, rnn_states_critic
         values = []
@@ -441,7 +447,7 @@ class OnPolicyBaseRunner:
             # actions: (torch.Tensor) actions for the given inputs. 【thread_num, 1】
             # action_log_probs: (torch.Tensor) log probabilities of actions. 【thread_num, 1】
             # rnn_states_actor: (torch.Tensor) updated RNN states for actor. 【thread_num, rnn层数，rnn_state_dim】
-            action, action_log_prob, rnn_state = self.actor[agent_id].get_actions(
+            action, action_log_prob, rnn_state, prediction_error, action_loss = self.actor[agent_id].get_actions(
                 self.actor_buffer[agent_id].obs[step],
                 self.actor_buffer[agent_id].rnn_states[step],
                 self.actor_buffer[agent_id].masks[step],
@@ -453,11 +459,15 @@ class OnPolicyBaseRunner:
             action_collector.append(_t2n(action))
             action_log_prob_collector.append(_t2n(action_log_prob))
             rnn_state_collector.append(_t2n(rnn_state))
+            prediction_error_collector.append(_t2n(prediction_error))
+            action_loss_collector.append(_t2n(action_loss))
 
         # 转置 (n_agents, n_threads, dim) -> (n_threads, n_agents, dim)
         actions = np.array(action_collector).transpose(1, 0, 2)
         action_log_probs = np.array(action_log_prob_collector).transpose(1, 0, 2)
         rnn_states = np.array(rnn_state_collector).transpose(1, 0, 2, 3)
+        prediction_errors = np.array(prediction_error_collector).transpose(1, 0, 2)
+        action_losss = np.array(action_loss_collector).transpose(1, 0, 2)
 
         """
         然后是critic的收集 - 伪代码14行
@@ -500,7 +510,7 @@ class OnPolicyBaseRunner:
                 )
             )
 
-        return values, actions, action_log_probs, rnn_states, rnn_states_critic
+        return values, actions, action_log_probs, rnn_states, rnn_states_critic, prediction_errors, action_losss
 
     def insert(self, data):
         """把这一个time step的数据插入到buffer中"""
@@ -516,6 +526,8 @@ class OnPolicyBaseRunner:
             action_log_probs,  # (n_threads, n_agents, 1)
             rnn_states,  # (n_threads, n_agents, rnn层数, hidden_dim)
             rnn_states_critic,  # EP: (n_threads, rnn层数, hidden_dim), FP: (n_threads, n_agents, dim)
+            prediction_errors,  # (n_threads, n_agents, 1)
+            action_losss,  # (n_threads, n_agents, 1)
         ) = data
 
         # 检查所有env thread是否done (n_threads, )
@@ -630,6 +642,8 @@ class OnPolicyBaseRunner:
                 rnn_states[:, agent_id],
                 actions[:, agent_id],
                 action_log_probs[:, agent_id],
+                prediction_errors[:, agent_id],
+                action_losss[:, agent_id],
                 masks[:, agent_id],
                 active_masks[:, agent_id],
                 available_actions[:, agent_id]

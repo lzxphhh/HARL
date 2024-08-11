@@ -72,7 +72,6 @@ class BottleneckLogger(BaseLogger):
             rnn_states,
             rnn_states_critic,
             prediction_errors,
-            action_losss,
         ) = data
         # 并行环境中的每个环境是否done （n_env_threads, ）
         dones_env = np.all(dones, axis=1)

@@ -10,10 +10,10 @@ import os
 # 2. 每30个episode的done的原因
 # 3. 每30个episode的平均长度
 
-class BottleneckLogger(BaseLogger):
+class BottleneckAttackLogger(BaseLogger):
 
     def __init__(self, args, algo_args, env_args, num_agents, writter, run_dir):
-        super(BottleneckLogger, self).__init__(
+        super(BottleneckAttackLogger, self).__init__(
             args, algo_args, env_args, num_agents, writter, run_dir
         )
         # declare some variables
