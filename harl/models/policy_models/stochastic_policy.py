@@ -65,10 +65,8 @@ class StochasticPolicy(nn.Module):
         self.veh_ids = self.CAV_ids + self.HDV_ids
         if self.strategy == 'prediction':
             self.prediction_output = {}
-            self.prediction_error = {}
             for i in range(3):
-                self.prediction_output[f'hist_{i + 1}'] = {veh_id: {pre_id:[] for pre_id in self.veh_ids} for veh_id in self.CAV_ids}
-                self.prediction_error[f'hist_{i + 1}'] = {veh_id: {pre_id:[] for pre_id in self.veh_ids} for veh_id in self.CAV_ids}
+                self.prediction_output[f'hist_{i + 1}'] = {veh_id: {pre_id: [] for pre_id in self.veh_ids} for veh_id in self.CAV_ids}
         # 如果使用RNN，初始化RNN层
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             self.rnn = RNNLayer(
@@ -133,62 +131,90 @@ class StochasticPolicy(nn.Module):
         actions, action_log_probs = self.act(
             actor_features, available_actions, deterministic
         )
-
-
+        # prediction_loss & action_loss
         prediction_error_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
         action_loss_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
         if self.strategy == 'prediction':
-            future_states, ego_id, prediction_groundtruth = self.prediction(reconstruct_info, actions, batch_size=obs.size(0))
-            prediction_error_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
-            if ego_id:
-                # prediction_mse_error = {key: torch.zeros(env_num, 1, device=self.tpdv['device']) for key in self.veh_ids}
-                prediction_mae_error = {key: torch.zeros(env_num, 1, device=self.tpdv['device']) for key in self.veh_ids}
-                if len(ego_id) > 10:
-                    print('ego_id:', ego_id)
-                for veh_id in self.veh_ids:
-                    if self.prediction_output['hist_1'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
-                        self.prediction_error['hist_1'][ego_id][veh_id] = self.prediction_output['hist_1'][ego_id][veh_id][:, 0, :] - \
-                                                                          prediction_groundtruth[veh_id][:, :] if self.prediction_output['hist_1'][ego_id][veh_id][:, 0, :] != [0, 0, 0] else [0, 0, 0]
-                        # prediction_mse_error[veh_id] = torch.mean(torch.pow(self.prediction_error['hist_1'][ego_id][veh_id], 2), dim=1, keepdim=True)
-                        prediction_mae_error[veh_id] = torch.mean(torch.abs(self.prediction_error['hist_1'][ego_id][veh_id]), dim=1, keepdim=True)
-                    else:
-                        self.prediction_error['hist_1'][ego_id][veh_id] = []
-                    if self.prediction_output['hist_2'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
-                        self.prediction_error['hist_2'][ego_id][veh_id] = self.prediction_output['hist_2'][ego_id][veh_id][:, 1, :] - \
-                                                                          prediction_groundtruth[veh_id][:, :] if self.prediction_output['hist_2'][ego_id][veh_id][:, 1, :] != [0, 0, 0] else [0, 0, 0]
-                        # prediction_mse_error[veh_id] = torch.mean(torch.pow(self.prediction_error['hist_2'][ego_id][veh_id], 2), dim=1, keepdim=True)
-                        prediction_mae_error[veh_id] = torch.mean(torch.abs(self.prediction_error['hist_2'][ego_id][veh_id]), dim=1, keepdim=True)
-                    else:
-                        self.prediction_error['hist_2'][ego_id][veh_id] = []
-                    if self.prediction_output['hist_3'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
-                        self.prediction_error['hist_3'][ego_id][veh_id] = self.prediction_output['hist_3'][ego_id][veh_id][:, 2, :] - \
-                                                                          prediction_groundtruth[veh_id][:, :] if self.prediction_output['hist_3'][ego_id][veh_id][:, 2, :] != [0, 0, 0] else [0, 0, 0]
-                        # prediction_mse_error[veh_id] = torch.mean(torch.pow(self.prediction_error['hist_3'][ego_id][veh_id], 2), dim=1, keepdim=True)
-                        prediction_mae_error[veh_id] = torch.mean(torch.abs(self.prediction_error['hist_3'][ego_id][veh_id]), dim=1, keepdim=True)
-                    else:
-                        self.prediction_error['hist_3'][ego_id][veh_id] = []
-
-                for i in range(env_num):
-                    error_cumulative = 0
-                    veh_count = 0
-                    for veh_id in self.veh_ids:
-                        if prediction_mae_error[veh_id][i, 0] != 0 and veh_id != ego_id:
-                            error_cumulative += prediction_mae_error[veh_id][i, 0]  # prediction_mse_error
-                            veh_count += 1
-                    if veh_count != 0:
-                        prediction_error_output[i, 0] = error_cumulative / veh_count
-                    else:
-                        prediction_error_output[i, 0] = 0
-                self.prediction_output['hist_3'][ego_id] = self.prediction_output['hist_2'][ego_id]
-                self.prediction_output['hist_2'][ego_id] = self.prediction_output['hist_1'][ego_id]
-                self.prediction_output['hist_1'][ego_id] = future_states
+            # future_states, ego_id, prediction_groundtruth = self.prediction(reconstruct_info, actions, batch_size=obs.size(0))
+            # action_is_zero = (reconstruct_info[7] == 0)
+            # action_all_zero = torch.all(action_is_zero)
+            # ego2cav_is_zero = (reconstruct_info[9] == 0)
+            # ego2cav_all_zero = torch.all(ego2cav_is_zero)
+            # ego2hdv_is_zero = (reconstruct_info[10] == 0)
+            # ego2hdv_all_zero = torch.all(ego2hdv_is_zero)
+            # all_zero = action_all_zero and ego2cav_all_zero and ego2hdv_all_zero
+            # if all_zero:
+            #     self.prediction_output['hist_3'][ego_id] = {pre_id: [] for pre_id in self.veh_ids}
+            #     self.prediction_output['hist_2'][ego_id] = {pre_id: [] for pre_id in self.veh_ids}
+            #     self.prediction_output['hist_1'][ego_id] = {pre_id: [] for pre_id in self.veh_ids}
+            # prediction_error_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
+            # prediction_error = {}
+            # prediction_mae_error = {}
+            # if ego_id:
+            #     for i in range(3):
+            #         prediction_error[f'hist_{i + 1}'] = {pre_id: [] for pre_id in self.veh_ids}
+            #         prediction_mae_error[f'hist_{i + 1}'] = {key: torch.zeros(env_num, 1, device=self.tpdv['device']) for key in self.veh_ids}
+            #     if len(ego_id) > 10:
+            #         print('ego_id:', ego_id)
+            #     for veh_id in self.veh_ids:
+            #         if self.prediction_output['hist_1'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
+            #             if prediction_groundtruth[veh_id].size() != self.prediction_output['hist_1'][ego_id][veh_id][:, 0, :].size():
+            #                 continue
+            #             else:
+            #                 prediction_error['hist_1'][veh_id] = self.prediction_output['hist_1'][ego_id][veh_id][:, 0, :] - \
+            #                                                      prediction_groundtruth[veh_id][:, :] if self.prediction_output['hist_1'][ego_id][veh_id][:, 0, :] != [0, 0, 0] else [0, 0, 0]
+            #                 # prediction_mse_error[veh_id] = torch.mean(torch.pow(self.prediction_error['hist_1'][ego_id][veh_id], 2), dim=1, keepdim=True)
+            #                 prediction_mae_error['hist_1'][veh_id] = torch.mean(torch.abs(prediction_error['hist_1'][veh_id]), dim=1, keepdim=True)
+            #         else:
+            #             prediction_error['hist_1'][veh_id] = []
+            #         if self.prediction_output['hist_2'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
+            #             if prediction_groundtruth[veh_id].size() != self.prediction_output['hist_2'][ego_id][veh_id][:, 1, :].size():
+            #                 continue
+            #             else:
+            #                 prediction_error['hist_2'][veh_id] = self.prediction_output['hist_2'][ego_id][veh_id][:, 1, :] - \
+            #                                                      prediction_groundtruth[veh_id][:, :] if self.prediction_output['hist_2'][ego_id][veh_id][:, 1, :] != [0, 0, 0] else [0, 0, 0]
+            #                 # prediction_mse_error[veh_id] = torch.mean(torch.pow(self.prediction_error['hist_2'][ego_id][veh_id], 2), dim=1, keepdim=True)
+            #                 prediction_mae_error['hist_2'][veh_id] = torch.mean(torch.abs(prediction_error['hist_2'][veh_id]), dim=1, keepdim=True)
+            #         else:
+            #             prediction_error['hist_2'][veh_id] = []
+            #         if self.prediction_output['hist_3'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
+            #             if prediction_groundtruth[veh_id].size() != self.prediction_output['hist_3'][ego_id][veh_id][:, 2, :].size():
+            #                 continue
+            #             else:
+            #                 prediction_error['hist_3'][veh_id] = self.prediction_output['hist_3'][ego_id][veh_id][:, 2, :] - \
+            #                                                      prediction_groundtruth[veh_id][:, :] if self.prediction_output['hist_3'][ego_id][veh_id][:, 2, :] != [0, 0, 0] else [0, 0, 0]
+            #                 # prediction_mse_error[veh_id] = torch.mean(torch.pow(self.prediction_error['hist_3'][ego_id][veh_id], 2), dim=1, keepdim=True)
+            #                 prediction_mae_error['hist_3'][veh_id] = torch.mean(torch.abs(prediction_error['hist_3'][veh_id]), dim=1, keepdim=True)
+            #         else:
+            #             prediction_error['hist_3'][veh_id] = []
+            #
+            #     for i in range(env_num):
+            #         error_cumulative = 0
+            #         veh_count = 0
+            #         for veh_id in self.veh_ids:
+            #             if prediction_mae_error['hist_1'][veh_id][i, 0] != 0 and veh_id != ego_id:
+            #                 error_cumulative += prediction_mae_error['hist_1'][veh_id][i, 0]  # prediction_mse_error
+            #                 veh_count += 1
+            #             if prediction_mae_error['hist_2'][veh_id][i, 0] != 0 and veh_id != ego_id:
+            #                 error_cumulative += prediction_mae_error['hist_2'][veh_id][i, 0]  # prediction_mse_error
+            #                 veh_count += 1
+            #             if prediction_mae_error['hist_3'][veh_id][i, 0] != 0 and veh_id != ego_id:
+            #                 error_cumulative += prediction_mae_error['hist_3'][veh_id][i, 0]  # prediction_mse_error
+            #                 veh_count += 1
+            #         if veh_count != 0:
+            #             prediction_error_output[i, 0] = error_cumulative / veh_count
+            #         else:
+            #             prediction_error_output[i, 0] = 0
+            #     self.prediction_output['hist_3'][ego_id] = self.prediction_output['hist_2'][ego_id]
+            #     self.prediction_output['hist_2'][ego_id] = self.prediction_output['hist_1'][ego_id]
+            #     self.prediction_output['hist_1'][ego_id] = future_states
 
             last_actor_action = reconstruct_info[7]
             last_actual_action = reconstruct_info[8]
             action_mse_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
-            action_cosine_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
+            # action_cosine_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
             action_mse_loss[:, 0] = torch.mean((last_actor_action[:, 0, 0] - last_actual_action[:, 0, 0]) ** 2)
-            action_cosine_loss[:, 0] = 1 - torch.nn.functional.cosine_similarity(last_actor_action[:, 0, 0], last_actual_action[:, 0, 0], dim=-1).mean()
+            # action_cosine_loss[:, 0] = 1 - torch.nn.functional.cosine_similarity(last_actor_action[:, 0, 0], last_actual_action[:, 0, 0], dim=-1).mean()
             action_loss_output[:, 0] = action_mse_loss[:, 0]
 
 

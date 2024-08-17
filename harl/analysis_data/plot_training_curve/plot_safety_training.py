@@ -57,12 +57,12 @@ event_paths = ['/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/exam
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/bottleneck/mappo/0725_HIAHR_DIU_mappo_no_lwcontroller/seed-00042-2024-07-28-09-09-59/logs/events.out.tfevents.1722128999.BugMakers',
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/bottleneck/mappo/0725_HIAHR_DIU_mappo_no_lwcontroller/seed-00042-2024-07-26-12-20-03/logs/events.out.tfevents.1721967603.liuzhengxuan-RESCUER-Y720-15IKB',
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/bottleneck/mappo/0725_HIAHR_DIU_mappo_no_lwcontroller/seed-00042-2024-07-28-17-23-31/logs/events.out.tfevents.1722158611.liuzhengxuan-RESCUER-Y720-15IKB']  # Adjust with actual paths
-plot_training_curve_with_variance(event_paths, scalar_name='average_collision_rate', label_name='w/o RSS', line_color='blue', window_size=5, p_alpha=0.2)
+plot_training_curve_with_variance(event_paths, scalar_name='average_collision_rate', label_name='w/o PSAF', line_color='blue', window_size=5, p_alpha=0.2)
 
 event_paths = ['/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/improve_HIAHR_DIU/mappo/mappo_1/logs/events.out.tfevents.1720678303.BugMakers',
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/improve_HIAHR_DIU/mappo/mappo_2/logs/events.out.tfevents.1721393148.BugMakers',
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/improve_HIAHR_DIU/mappo/mappo_3/logs/events.out.tfevents.1721455097.BugMakers']  # Adjust with actual paths
-plot_training_curve_with_variance(event_paths, scalar_name='average_collision_rate', label_name='w/ RSS', line_color='red', window_size=5, p_alpha=0.2)
+plot_training_curve_with_variance(event_paths, scalar_name='average_collision_rate', label_name='w/ PSAF', line_color='red', window_size=5, p_alpha=0.2)
 
 y_label='Mean Collision Rate'
 plt.xlabel('No. of training steps', fontsize=36, color='black')
@@ -87,12 +87,12 @@ event_paths = ['/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/exam
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/bottleneck/mappo/0725_HIAHR_DIU_mappo_no_lwcontroller/seed-00042-2024-07-28-09-09-59/logs/events.out.tfevents.1722128999.BugMakers',
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/bottleneck/mappo/0725_HIAHR_DIU_mappo_no_lwcontroller/seed-00042-2024-07-26-12-20-03/logs/events.out.tfevents.1721967603.liuzhengxuan-RESCUER-Y720-15IKB',
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/bottleneck/mappo/0725_HIAHR_DIU_mappo_no_lwcontroller/seed-00042-2024-07-28-17-23-31/logs/events.out.tfevents.1722158611.liuzhengxuan-RESCUER-Y720-15IKB']  # Adjust with actual paths
-plot_training_curve_with_variance(event_paths, scalar_name='average_episode_length', label_name='w/o RSS', line_color='blue', window_size=5, p_alpha=0.2)
+plot_training_curve_with_variance(event_paths, scalar_name='average_episode_length', label_name='w/o PSAF', line_color='blue', window_size=5, p_alpha=0.2)
 
 event_paths = ['/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/improve_HIAHR_DIU/mappo/mappo_1/logs/events.out.tfevents.1720678303.BugMakers',
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/improve_HIAHR_DIU/mappo/mappo_2/logs/events.out.tfevents.1721393148.BugMakers',
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/improve_HIAHR_DIU/mappo/mappo_3/logs/events.out.tfevents.1721455097.BugMakers']  # Adjust with actual paths
-plot_training_curve_with_variance(event_paths, scalar_name='average_episode_length', label_name='w/ RSS', line_color='red', window_size=5, p_alpha=0.2)
+plot_training_curve_with_variance(event_paths, scalar_name='average_episode_length', label_name='w/ PSAF', line_color='red', window_size=5, p_alpha=0.2)
 
 y_label='Mean Episode Length'
 plt.xlabel('No. of training steps', fontsize=36, color='black')
@@ -117,12 +117,12 @@ event_paths = ['/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/exam
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/bottleneck/mappo/0725_HIAHR_DIU_mappo_no_lwcontroller/seed-00042-2024-07-28-09-09-59/logs/events.out.tfevents.1722128999.BugMakers',
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/bottleneck/mappo/0725_HIAHR_DIU_mappo_no_lwcontroller/seed-00042-2024-07-26-12-20-03/logs/events.out.tfevents.1721967603.liuzhengxuan-RESCUER-Y720-15IKB',
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/bottleneck/mappo/0725_HIAHR_DIU_mappo_no_lwcontroller/seed-00042-2024-07-28-17-23-31/logs/events.out.tfevents.1722158611.liuzhengxuan-RESCUER-Y720-15IKB']  # Adjust with actual paths
-plot_training_curve_with_variance(event_paths, scalar_name='train_episode_rewards', label_name='w/o RSS', line_color='blue', window_size=5, p_alpha=0.2)
+plot_training_curve_with_variance(event_paths, scalar_name='train_episode_rewards', label_name='w/o PSAF', line_color='blue', window_size=5, p_alpha=0.2)
 
 event_paths = ['/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/improve_HIAHR_DIU/mappo/mappo_1/logs/events.out.tfevents.1720678303.BugMakers',
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/improve_HIAHR_DIU/mappo/mappo_2/logs/events.out.tfevents.1721393148.BugMakers',
                '/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/examples/results/bottleneck/improve_HIAHR_DIU/mappo/mappo_3/logs/events.out.tfevents.1721455097.BugMakers']  # Adjust with actual paths
-plot_training_curve_with_variance(event_paths, scalar_name='train_episode_rewards', label_name='w/ RSS', line_color='red', window_size=5, p_alpha=0.2)
+plot_training_curve_with_variance(event_paths, scalar_name='train_episode_rewards', label_name='w/ PSAF', line_color='red', window_size=5, p_alpha=0.2)
 
 y_label='Mean Episode Rewards'
 plt.xlabel('No. of training steps', fontsize=36, color='black')

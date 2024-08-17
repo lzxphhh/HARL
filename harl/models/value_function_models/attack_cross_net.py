@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from harl.models.base.mlp import MLPBase
-from harl.models.base.simple_layers import CrossAttention, GAT
+from harl.models.base.simple_layers import CrossAttention, GAT, MultiVeh_GAT
 from einops import rearrange, repeat
 
 class Attack_cross_net(nn.Module):
@@ -32,7 +32,8 @@ class Attack_cross_net(nn.Module):
         self.mlp_all_lane = MLPBase(args, [18 * 6])
         self.mlp_global_combined = MLPBase(args, [10 + 64 * 3])
 
-        self.gat_all_vehs = GAT(nfeat=3, nhid=16, nclass=64, dropout=0.1, alpha=0.2, nheads=1)
+        self.gat_all_vehs = MultiVeh_GAT(nfeat=3, nhid=16, nclass=64, dropout=0.2, alpha=0.2, nheads=1)
+        # self.gat_all_vehs = GAT(nfeat=3, nhid=16, nclass=64, dropout=0.1, alpha=0.2, nheads=1)
 
         # cross-aware encoder
         self.cross_attention = CrossAttention(64, 8, 64, 0.1)
@@ -100,7 +101,7 @@ class Attack_cross_net(nn.Module):
 
         # cross-aware representation
         input1 = global_combined_embedding.unsqueeze(1)
-        input2 = all_veh_relation.unsqueeze(1)
+        input2 = all_veh_relation
         cross_embedding = self.cross_attention(input1, input2)
         cross_embedding = cross_embedding.squeeze(1)
 

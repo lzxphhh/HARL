@@ -418,7 +418,7 @@ class VehEnvWrapper(gym.Wrapper):
                         lc_action = 4
                     else:
                         lc_action = 0
-                self.lowercontroller_action[_veh_id].append([lc_action, self.actions[_veh_id][0], self.actions[_veh_id][1]])
+                self.lowercontroller_action[_veh_id].append([lc_action, action_0, action_1])
 
                 # if self.actions[_veh_id][0] != self.action_command[0]:
                 #     change_action_mark = 1

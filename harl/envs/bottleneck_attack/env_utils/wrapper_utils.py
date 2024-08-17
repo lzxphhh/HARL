@@ -438,11 +438,11 @@ def get_target(
     target_points = {}
     for ego_id, ego_info in ego_statistics.items():
         if ego_info[0][0] < 400:
-            target_points[ego_id] = [400/700, ego_info[0][1]]
+            target_points[ego_id] = [400/700, ego_info[0][1]/3.2]
         elif ego_info[0][0] < 496:
-            target_points[ego_id] = [496/700, 1.6] if ego_info[0][1] > 0 else [496/700, -1.6]
+            target_points[ego_id] = [496/700, 1.6/3.2] if ego_info[0][1] > 0 else [496/700, -1.6/3.2]
         else:
-            target_points[ego_id] = [1, 1.6] if ego_info[0][1] > 0 else [1, -1.6]
+            target_points[ego_id] = [1, 1.6/3.2] if ego_info[0][1] > 0 else [1, -1.6/3.2]
     return target_points
 
 def compute_base_ego_vehicle_features(
@@ -747,7 +747,7 @@ def compute_hierarchical_ego_vehicle_features(
         # 位置归一化  - 2
         position_x, position_y = position
         normalized_position_x = position_x / 700
-        normalized_position_y = position_y
+        normalized_position_y = position_y / 3.2
         # 转向归一化 - 1
         normalized_heading = heading / 360
         # One-hot encode road_id - 5
@@ -812,7 +812,7 @@ def compute_hierarchical_ego_vehicle_features(
         # 位置归一化  - 2
         position_x, position_y = position
         normalized_position_x = position_x / 700
-        normalized_position_y = position_y
+        normalized_position_y = position_y / 3.2
         # 转向归一化 - 1
         normalized_heading = heading / 360
         # One-hot encode road_id - 5
@@ -827,14 +827,14 @@ def compute_hierarchical_ego_vehicle_features(
         ego_hist_3 = self.vehicles_hist['hist_4'][ego_id]
         ego_hist_2 = self.vehicles_hist['hist_3'][ego_id]
         ego_hist_1 = self.vehicles_hist['hist_2'][ego_id]
-        relative_hist_4 = [(ego_hist_4[0] - position_x)/700, ego_hist_4[1] - position_y, (speed - ego_hist_4[2])/15] if ego_hist_4[0] != 0 else [0, 0, 0]
-        relative_hist_3 = [(ego_hist_3[0] - position_x)/700, ego_hist_3[1] - position_y, (speed - ego_hist_3[2])/15] if ego_hist_3[0] != 0 else [0, 0, 0]
-        relative_hist_2 = [(ego_hist_2[0] - position_x)/700, ego_hist_2[1] - position_y, (speed - ego_hist_2[2])/15] if ego_hist_2[0] != 0 else [0, 0, 0]
-        relative_hist_1 = [(ego_hist_1[0] - position_x)/700, ego_hist_1[1] - position_y, (speed - ego_hist_1[2])/15] if ego_hist_1[0] != 0 else [0, 0, 0]
+        relative_hist_4 = [(ego_hist_4[0] - position_x)/700, (ego_hist_4[1] - position_y)/3.2, (speed - ego_hist_4[2])/15] if ego_hist_4[0] != 0 else [0, 0, 0]
+        relative_hist_3 = [(ego_hist_3[0] - position_x)/700, (ego_hist_3[1] - position_y)/3.2, (speed - ego_hist_3[2])/15] if ego_hist_3[0] != 0 else [0, 0, 0]
+        relative_hist_2 = [(ego_hist_2[0] - position_x)/700, (ego_hist_2[1] - position_y)/3.2, (speed - ego_hist_2[2])/15] if ego_hist_2[0] != 0 else [0, 0, 0]
+        relative_hist_1 = [(ego_hist_1[0] - position_x)/700, (ego_hist_1[1] - position_y)/3.2, (speed - ego_hist_1[2])/15] if ego_hist_1[0] != 0 else [0, 0, 0]
         relative_current = [0, 0, 0]
         ego_hdv_motion[ego_id] = relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + relative_current
-        last_action = self.lowercontroller_action[ego_id][-1] if self.lowercontroller_action[ego_id] else [0, 0, 0]
-        last_action[2] = last_action[2] / 15
+        last_action = copy.deepcopy(self.lowercontroller_action[ego_id][-1]) if self.lowercontroller_action[ego_id] else [0, 0, 0]
+        last_action = [last_action[0]/4, last_action[1]/4, last_action[2]/15]
         relative_motion = relative_current + last_action
         relative_motion += [0] * (15 - len(relative_motion))
         ego_cav_motion[ego_id] = relative_motion
@@ -849,25 +849,25 @@ def compute_hierarchical_ego_vehicle_features(
                 target_hist_3 = self.vehicles_hist['hist_4'][statistics[0]]
                 target_hist_2 = self.vehicles_hist['hist_3'][statistics[0]]
                 target_hist_1 = self.vehicles_hist['hist_2'][statistics[0]]
-                relative_hist_4 = [(target_hist_4[0] - position_x - 5)/700, target_hist_4[1] - position_y, (speed - target_hist_4[2])/15] if target_hist_4[0] != 0 else [0, 0, 0]
-                relative_hist_3 = [(target_hist_3[0] - position_x - 5)/700, target_hist_3[1] - position_y, (speed - target_hist_3[2])/15] if target_hist_3[0] != 0 else [0, 0, 0]
-                relative_hist_2 = [(target_hist_2[0] - position_x - 5)/700, target_hist_2[1] - position_y, (speed - target_hist_2[2])/15] if target_hist_2[0] != 0 else [0, 0, 0]
-                relative_hist_1 = [(target_hist_1[0] - position_x - 5)/700, target_hist_1[1] - position_y, (speed - target_hist_1[2])/15] if target_hist_1[0] != 0 else [0, 0, 0]
-                relative_current = [relat_x/700, relat_y, relat_v/15]
+                relative_hist_4 = [(target_hist_4[0] - position_x)/700, (target_hist_4[1] - position_y)/3.2, (speed - target_hist_4[2])/15] if target_hist_4[0] != 0 else [0, 0, 0]
+                relative_hist_3 = [(target_hist_3[0] - position_x)/700, (target_hist_3[1] - position_y)/3.2, (speed - target_hist_3[2])/15] if target_hist_3[0] != 0 else [0, 0, 0]
+                relative_hist_2 = [(target_hist_2[0] - position_x)/700, (target_hist_2[1] - position_y)/3.2, (speed - target_hist_2[2])/15] if target_hist_2[0] != 0 else [0, 0, 0]
+                relative_hist_1 = [(target_hist_1[0] - position_x)/700, (target_hist_1[1] - position_y)/3.2, (speed - target_hist_1[2])/15] if target_hist_1[0] != 0 else [0, 0, 0]
+                relative_current = [relat_x/700, relat_y/3.2, relat_v/15]
                 relative_motion = [0] + relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + relative_current
                 surround_stats[ego_id].append(relative_motion)
             elif surround_ID[:3] == 'CAV':
-                relative_current = [relat_x/700, relat_y, relat_v/15]
-                last_action = self.lowercontroller_action[statistics[0]][-1] if self.lowercontroller_action[statistics[0]] else [0, 0, 0]
-                last_action[2] = last_action[2] / 15
+                relative_current = [relat_x/700, relat_y/3.2, relat_v/15]
+                last_action = copy.deepcopy(self.lowercontroller_action[ego_id][-1]) if self.lowercontroller_action[statistics[0]] else [0, 0, 0]
+                last_action = [last_action[0]/4, last_action[1]/4, last_action[2]/15]
                 relative_motion = [1] + relative_current + last_action
                 if len(relative_motion) < 16:
                     relative_motion += [0] * (16 - len(relative_motion))
                 surround_stats[ego_id].append(relative_motion)
             vehicle_relation_graph[vehicle_order[ego_id], vehicle_order[statistics[0]]] = 1
             vehicle_relation_graph[vehicle_order[statistics[0]], vehicle_order[ego_id]] = 1
-        cav_last_action = self.lowercontroller_action[ego_id][-1] if self.lowercontroller_action[ego_id] else [0, 0, 0]
-        cav_last_action[2] = cav_last_action[2] / 15
+        cav_last_action = copy.deepcopy(self.lowercontroller_action[ego_id][-1]) if self.lowercontroller_action[ego_id] else [0, 0, 0]
+        cav_last_action = [cav_last_action[0] / 4, cav_last_action[1] / 4, cav_last_action[2] / 15]
         cav_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed, normalized_heading] + cav_last_action
         ego_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed,
                              normalized_heading] + road_id_one_hot + lane_index_one_hot
@@ -875,7 +875,7 @@ def compute_hierarchical_ego_vehicle_features(
             for i in range(self.hist_length - 1):
                 self.vehicles_hist[f'hist_{self.hist_length - i}'][ego_id] = copy.deepcopy(
                     self.vehicles_hist[f'hist_{self.hist_length - i - 1}'][ego_id])
-            last_action = self.lowercontroller_action[ego_id][-1] if self.lowercontroller_action[ego_id] else [0, 0, 0]
+            last_action = copy.deepcopy(self.lowercontroller_action[ego_id][-1]) if self.lowercontroller_action[ego_id] else [0, 0, 0]
             self.vehicles_hist['hist_1'][ego_id] = [position_x, position_y, speed, heading] + last_action
     # convert to 2D array
     for i in range(self.max_num_CAVs):
@@ -961,14 +961,14 @@ def compute_hierarchical_ego_vehicle_features(
         ego_hist_3 = self.vehicles_hist['hist_4'][ego_id]
         ego_hist_2 = self.vehicles_hist['hist_3'][ego_id]
         ego_hist_1 = self.vehicles_hist['hist_2'][ego_id]
-        relative_hist_4 = [(ego_hist_4[0] - position_x), ego_hist_4[1] - position_y,
-                           (speed - ego_hist_4[2]), (ego_hist_4[3] - heading)] if ego_hist_4[0] != 0 else [0, 0, 0, 0]
-        relative_hist_3 = [(ego_hist_3[0] - position_x), ego_hist_3[1] - position_y,
-                           (speed - ego_hist_3[2]), (ego_hist_3[3] - heading)] if ego_hist_3[0] != 0 else [0, 0, 0, 0]
-        relative_hist_2 = [(ego_hist_2[0] - position_x), ego_hist_2[1] - position_y,
-                           (speed - ego_hist_2[2]), (ego_hist_2[3] - heading)] if ego_hist_2[0] != 0 else [0, 0, 0, 0]
-        relative_hist_1 = [(ego_hist_1[0] - position_x), ego_hist_1[1] - position_y,
-                           (speed - ego_hist_1[2]), (ego_hist_1[3] - heading)] if ego_hist_1[0] != 0 else [0, 0, 0, 0]
+        relative_hist_4 = [(ego_hist_4[0] - position_x)/700, (ego_hist_4[1] - position_y)/3.2,
+                           (speed - ego_hist_4[2])/15, (ego_hist_4[3] - heading)/360] if ego_hist_4[0] != 0 else [0, 0, 0, 0]
+        relative_hist_3 = [(ego_hist_3[0] - position_x)/700, (ego_hist_3[1] - position_y)/3.2,
+                           (speed - ego_hist_3[2])/15, (ego_hist_3[3] - heading)/360] if ego_hist_3[0] != 0 else [0, 0, 0, 0]
+        relative_hist_2 = [(ego_hist_2[0] - position_x)/700, (ego_hist_2[1] - position_y)/3.2,
+                           (speed - ego_hist_2[2])/15, (ego_hist_2[3] - heading)/360] if ego_hist_2[0] != 0 else [0, 0, 0, 0]
+        relative_hist_1 = [(ego_hist_1[0] - position_x)/700, (ego_hist_1[1] - position_y)/3.2,
+                           (speed - ego_hist_1[2])/15, (ego_hist_1[3] - heading)/360] if ego_hist_1[0] != 0 else [0, 0, 0, 0]
         reltaive_current = [0, 0, 0, 0]
         ego_motion = relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + reltaive_current
         expand_surround_stats[ego_id]['ego'] = ego_motion
@@ -978,15 +978,15 @@ def compute_hierarchical_ego_vehicle_features(
             target_hist_3 = self.vehicles_hist['hist_4'][statistics[0]]
             target_hist_2 = self.vehicles_hist['hist_3'][statistics[0]]
             target_hist_1 = self.vehicles_hist['hist_2'][statistics[0]]
-            relative_hist_4 = [(target_hist_4[0] - position_x - 5), target_hist_4[1] - position_y,
-                               (speed - target_hist_4[2]), (target_hist_4[3] - heading)] if target_hist_4[0] != 0 else [0, 0, 0, 0]
-            relative_hist_3 = [(target_hist_3[0] - position_x - 5), target_hist_3[1] - position_y,
-                               (speed - target_hist_3[2]), (target_hist_3[3] - heading)] if target_hist_3[0] != 0 else [0, 0, 0, 0]
-            relative_hist_2 = [(target_hist_2[0] - position_x - 5), target_hist_2[1] - position_y,
-                               (speed - target_hist_2[2]), (target_hist_2[3] - heading)] if target_hist_2[0] != 0 else [0, 0, 0, 0]
-            relative_hist_1 = [(target_hist_1[0] - position_x - 5), target_hist_1[1] - position_y,
-                               (speed - target_hist_1[2]), (target_hist_1[3] - heading)] if target_hist_1[0] != 0 else [0, 0, 0, 0]
-            reltaive_current = [relat_x, relat_y, relat_v, 0]
+            relative_hist_4 = [(target_hist_4[0] - position_x)/700, (target_hist_4[1] - position_y)/3.2,
+                               (speed - target_hist_4[2])/15, (target_hist_4[3] - heading)/360] if target_hist_4[0] != 0 else [0, 0, 0, 0]
+            relative_hist_3 = [(target_hist_3[0] - position_x)/700, (target_hist_3[1] - position_y)/3.2,
+                               (speed - target_hist_3[2])/15, (target_hist_3[3] - heading)/360] if target_hist_3[0] != 0 else [0, 0, 0, 0]
+            relative_hist_2 = [(target_hist_2[0] - position_x)/700, (target_hist_2[1] - position_y)/3.2,
+                               (speed - target_hist_2[2])/15, (target_hist_2[3] - heading)/360] if target_hist_2[0] != 0 else [0, 0, 0, 0]
+            relative_hist_1 = [(target_hist_1[0] - position_x)/700, (target_hist_1[1] - position_y)/3.2,
+                               (speed - target_hist_1[2])/15, (target_hist_1[3] - heading)/360] if target_hist_1[0] != 0 else [0, 0, 0, 0]
+            reltaive_current = [relat_x/700, relat_y/3.2, relat_v/15, 0]
             relative_motion = relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + reltaive_current
             expand_surround_stats[ego_id][_] = relative_motion
             if statistics[0][:3] == 'HDV':
@@ -1008,10 +1008,12 @@ def compute_hierarchical_ego_vehicle_features(
         feature_vectors_current[ego_id]['self_stats'] = ego_stats[ego_id]
         feature_vectors_current[ego_id]['distance_bott'] = np.array([bottle_neck_position_x - ego_stats[ego_id][0], 0])
         feature_vectors_current[ego_id]['distance_end'] = np.array([1 - ego_stats[ego_id][0], 0])
-        last_action = self.actor_action[ego_id][-1] if self.actor_action[ego_id] else [0, 0, 0]
-        feature_vectors_current[ego_id]['actor_action'] = np.array(last_action)
-        last_action = self.lowercontroller_action[ego_id][-1] if self.lowercontroller_action[ego_id] else [0, 0, 0]
-        feature_vectors_current[ego_id]['actual_action'] = np.array(last_action)
+        last_actor_action = copy.deepcopy(self.actor_action[ego_id][-1]) if self.actor_action[ego_id] else [0, 0, 0]
+        last_actor_action = [last_actor_action[0] / 4, last_actor_action[1] / 4, last_actor_action[2] / 15]
+        feature_vectors_current[ego_id]['actor_action'] = np.array(last_actor_action)
+        last_actual_action = copy.deepcopy(self.lowercontroller_action[ego_id][-1]) if self.lowercontroller_action[ego_id] else [0, 0, 0]
+        last_actual_action = [last_actual_action[0] / 4, last_actual_action[1] / 4, last_actual_action[2] / 15]
+        feature_vectors_current[ego_id]['actual_action'] = np.array(last_actual_action)
         feature_vectors_current[ego_id]['ego_cav_motion'] = np.array(ego_cav_motion[ego_id])
         feature_vectors_current[ego_id]['ego_hdv_motion'] = np.array(ego_hdv_motion[ego_id])
 

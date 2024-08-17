@@ -74,20 +74,26 @@ class TIE_rep(nn.Module):
     def forward(self, obs, batch_size=20):
         # obs: (n_rollout_thread, obs_dim)
         info_current = self.reconstruct_info(obs)
-
-        self.adj_surround_cav = torch.ones(batch_size, 6+1, 6+1)
+        # 初始化张量
+        self.adj_surround_cav = torch.ones(batch_size, 6+1, 6+1, device='cuda')  # 7 = 6 + 1
+        self.adj_surround_hdv = torch.ones(batch_size, 6+1, 6+1, device='cuda')
+        # 将中间部分置零
         self.adj_surround_cav[:, 1:, 1:] = 0
-        self.adj_surround_hdv = torch.ones(batch_size, 6+1, 6+1)
         self.adj_surround_hdv[:, 1:, 1:] = 0
-        for env in range(batch_size):
-            for i in range(6):  # type mask
-                type_mask = info_current[11][env, i, 0]
-                if type_mask == 0:
-                    self.adj_surround_cav[env, 0, i+1] = 0
-                    self.adj_surround_cav[env, i+1, 0] = 0
-                if type_mask == 1:
-                    self.adj_surround_hdv[env, 0, i+1] = 0
-                    self.adj_surround_hdv[env, i+1, 0] = 0
+        # 获取 type_mask 信息
+        type_masks = info_current[11][:, :, 0]  # shape: [batch_size, 6]
+        # 创建掩码矩阵
+        cav_mask = (type_masks == 0).float()  # 将布尔类型转换为 Float 类型
+        hdv_mask = (type_masks == 1).float()
+        # 创建索引
+        batch_indices = torch.arange(batch_size).unsqueeze(1)  # shape: [batch_size, 1]
+        indices = torch.arange(1, 7).unsqueeze(0)  # shape: [1, 6]
+        # 对 cav 矩阵进行修改
+        self.adj_surround_cav[batch_indices, 0, indices] = hdv_mask
+        self.adj_surround_cav[batch_indices, indices, 0] = hdv_mask
+        # 对 hdv 矩阵进行修改
+        self.adj_surround_hdv[batch_indices, 0, indices] = cav_mask
+        self.adj_surround_hdv[batch_indices, indices, 0] = cav_mask
 
         ################################################## trajectory-aware interaction encoder ######################################################
         # bottle_neck_0, distance_bott_0, road_end_0, distance_end_0, target_0
