@@ -6,7 +6,6 @@ from harl.models.base.rnn import RNNLayer
 from harl.utils.envs_tools import check, get_shape_from_obs_space
 from harl.utils.models_tools import init, get_init_method
 from harl.models.value_function_models.cross_aware_net import Cross_aware_net
-from harl.models.value_function_models.interaction_cross_net import Iteraction_cross_net
 
 class VNet(nn.Module):
     """V Network. Outputs value function predictions given global states."""
@@ -34,8 +33,7 @@ class VNet(nn.Module):
         # 根据观测空间的形状，选择CNN或者MLP作为基础网络，用于base提取特征，输入大小cent_obs_shape，输出大小hidden_sizes[-1]
         base = CNNBase if len(cent_obs_shape) == 3 else MLPBase
         self.base = base(args, cent_obs_shape)
-        self.cross_aware_old = Cross_aware_net(args, cent_obs_shape)
-        self.cross_aware_new = Iteraction_cross_net(args, cent_obs_shape)
+        self.cross_aware = Cross_aware_net(args, cent_obs_shape)
         # self.base_net = MLPBase(args, [16 * 3 + 18 * 6 + 2])
 
         # 如果使用RNN，初始化RNN层 #TODO: 暂时还没看
@@ -103,7 +101,7 @@ class VNet(nn.Module):
         # 用base提取特征-输入大小obs_shape，输出大小hidden_sizes[-1], eg: TensorShape([20, 120]) 并行环境数量 x hidden_sizes[-1]
         # critic_features = self.base(cent_obs)
         # critic_features = self.hierarchical_net(cent_obs)
-        critic_features = self.cross_aware_new(cent_obs)
+        critic_features = self.cross_aware(cent_obs)
 
         # 如果使用RNN，将特征和RNN状态输入RNN层，得到新的特征和RNN状态
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:

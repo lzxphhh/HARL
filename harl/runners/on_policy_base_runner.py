@@ -117,7 +117,7 @@ class OnPolicyBaseRunner:
             self.actor = []
             # 初始化actor网络，进入mappo.py
             agent = ALGO_REGISTRY[args["algo"]](
-                {**algo_args["model"], **algo_args["algo"]},  # yaml里model和algo的config打包作为args进入OnPolicyBase
+                {**algo_args["model"], **algo_args["algo"], **algo_args["train"], **env_args},  # yaml里model和algo的config打包作为args进入OnPolicyBase
                 self.envs.observation_space[0], # 单个agent的观测空间
                 self.envs.action_space[0], # 单个agent的动作空间
                 device=self.device,
@@ -145,7 +145,7 @@ class OnPolicyBaseRunner:
             for agent_id in range(self.num_agents):
                 # 给每一个agent初始化actor网络，进入mappo.py 【根据其不同的obs_dim和act_dim】
                 agent = ALGO_REGISTRY[args["algo"]](
-                    {**algo_args["model"], **algo_args["algo"]},
+                    {**algo_args["model"], **algo_args["algo"], **algo_args["train"], **env_args},
                     self.envs.observation_space[agent_id],
                     self.envs.action_space[agent_id],
                     device=self.device,
@@ -174,7 +174,7 @@ class OnPolicyBaseRunner:
             # 创建centralized critic网络
             self.critic = VCritic(
                 # yaml里model和algo的config打包作为args进入VCritic
-                {**algo_args["model"], **algo_args["algo"]},
+                {**algo_args["model"], **algo_args["algo"], **algo_args["train"], **env_args},
                 # 中心式的值函数centralized critic的输入是单个agent拿到的share_observation_space dim
                 share_observation_space,
                 device=self.device,
@@ -283,7 +283,6 @@ class OnPolicyBaseRunner:
                     action_log_probs,
                     rnn_states,  # rnn_states是actor的rnn的hidden state
                     rnn_states_critic,  # rnn_states_critic是critic的rnn的hidden state
-                    prediction_errors,
                     action_losss,
                 ) = self.collect(step)
 
@@ -324,7 +323,6 @@ class OnPolicyBaseRunner:
                     action_log_probs,
                     rnn_states,
                     rnn_states_critic,
-                    prediction_errors,
                     action_losss,
                 )
 
@@ -420,7 +418,6 @@ class OnPolicyBaseRunner:
         action_collector = []
         action_log_prob_collector = []
         rnn_state_collector = []
-        prediction_error_collector = []
         action_loss_collector = []
 
         # 从critic中收集values, rnn_states_critic
@@ -447,7 +444,7 @@ class OnPolicyBaseRunner:
             # actions: (torch.Tensor) actions for the given inputs. 【thread_num, 1】
             # action_log_probs: (torch.Tensor) log probabilities of actions. 【thread_num, 1】
             # rnn_states_actor: (torch.Tensor) updated RNN states for actor. 【thread_num, rnn层数，rnn_state_dim】
-            action, action_log_prob, rnn_state, prediction_error, action_loss = self.actor[agent_id].get_actions(
+            action, action_log_prob, rnn_state, action_loss = self.actor[agent_id].get_actions(
                 self.actor_buffer[agent_id].obs[step],
                 self.actor_buffer[agent_id].rnn_states[step],
                 self.actor_buffer[agent_id].masks[step],
@@ -459,14 +456,12 @@ class OnPolicyBaseRunner:
             action_collector.append(_t2n(action))
             action_log_prob_collector.append(_t2n(action_log_prob))
             rnn_state_collector.append(_t2n(rnn_state))
-            prediction_error_collector.append(_t2n(prediction_error))
             action_loss_collector.append(_t2n(action_loss))
 
         # 转置 (n_agents, n_threads, dim) -> (n_threads, n_agents, dim)
         actions = np.array(action_collector).transpose(1, 0, 2)
         action_log_probs = np.array(action_log_prob_collector).transpose(1, 0, 2)
         rnn_states = np.array(rnn_state_collector).transpose(1, 0, 2, 3)
-        prediction_errors = np.array(prediction_error_collector).transpose(1, 0, 2)
         action_losss = np.array(action_loss_collector).transpose(1, 0, 2)
 
         """
@@ -510,7 +505,7 @@ class OnPolicyBaseRunner:
                 )
             )
 
-        return values, actions, action_log_probs, rnn_states, rnn_states_critic, prediction_errors, action_losss
+        return values, actions, action_log_probs, rnn_states, rnn_states_critic, action_losss
 
     def insert(self, data):
         """把这一个time step的数据插入到buffer中"""
@@ -526,7 +521,6 @@ class OnPolicyBaseRunner:
             action_log_probs,  # (n_threads, n_agents, 1)
             rnn_states,  # (n_threads, n_agents, rnn层数, hidden_dim)
             rnn_states_critic,  # EP: (n_threads, rnn层数, hidden_dim), FP: (n_threads, n_agents, dim)
-            prediction_errors,  # (n_threads, n_agents, 1)
             action_losss,  # (n_threads, n_agents, 1)
         ) = data
 
@@ -642,7 +636,6 @@ class OnPolicyBaseRunner:
                 rnn_states[:, agent_id],
                 actions[:, agent_id],
                 action_log_probs[:, agent_id],
-                prediction_errors[:, agent_id],
                 action_losss[:, agent_id],
                 masks[:, agent_id],
                 active_masks[:, agent_id],

@@ -11,27 +11,18 @@ import time
 class Prediction(nn.Module):
     def __init__(self, obs_dim, action_dim, n_embd, action_type='Discrete', args=None):
         super(Prediction, self).__init__()
-        # Load the environment arguments
-        env_args = yaml.load(
-            open('/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/harl/configs/envs_cfgs/bottleneck_attack.yaml', 'r'),
-            Loader=yaml.FullLoader)
-        self.env_args = copy.deepcopy(env_args)
-        train_args = yaml.load(
-            open('/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/harl/configs/algos_cfgs/mappo.yaml', 'r'),
-            Loader=yaml.FullLoader)
-        self.train_args = copy.deepcopy(train_args)
-        self.max_num_HDVs = env_args['max_num_HDVs']
-        self.max_num_CAVs = env_args['max_num_CAVs']
-        self.num_HDVs = env_args['num_HDVs']
-        self.num_CAVs = env_args['num_CAVs']
-        self.hist_length = env_args['hist_length']
+        self.max_num_HDVs = args['max_num_HDVs']
+        self.max_num_CAVs = args['max_num_CAVs']
+        self.num_HDVs = args['num_HDVs']
+        self.num_CAVs = args['num_CAVs']
+        self.hist_length = args['hist_length']
         # 单个智能体obs_dim
         self.obs_dim = obs_dim
         # 单个智能体action_dim
         self.action_dim = action_dim
         self.n_embd = n_embd
         self.action_type = action_type
-        self.para_env = train_args['train']['n_rollout_threads']
+        self.para_env = args['train']['n_rollout_threads']
 
         # prediction encoder & decoder
         self.mlp_surround_lane = MLPBase(args, [3 * 6])

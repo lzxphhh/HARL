@@ -68,6 +68,8 @@ def get_task_name(env, env_args):
         task = f"{env_args['scenario']}-{env_args['task']}"
     elif env == "bottleneck":
         task = f"{env_args['scenario']}"
+    elif env == "bottleneck_new":
+        task = f"{env_args['scenario']}"
     elif env == "bottleneck_attack":
         task = f"{env_args['scenario']}"
     return task

@@ -11,27 +11,18 @@ import time
 class TIE_rep(nn.Module):
     def __init__(self, obs_dim, action_dim, n_embd, action_type='Discrete', args=None):
         super(TIE_rep, self).__init__()
-        # Load the environment arguments
-        env_args = yaml.load(
-            open('/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/harl/configs/envs_cfgs/bottleneck_attack.yaml', 'r'),
-            Loader=yaml.FullLoader)
-        self.env_args = copy.deepcopy(env_args)
-        train_args = yaml.load(
-            open('/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/harl/configs/algos_cfgs/mappo.yaml', 'r'),
-            Loader=yaml.FullLoader)
-        self.train_args = copy.deepcopy(train_args)
-        self.max_num_HDVs = env_args['max_num_HDVs']
-        self.max_num_CAVs = env_args['max_num_CAVs']
-        self.num_HDVs = env_args['num_HDVs']
-        self.num_CAVs = env_args['num_CAVs']
-        self.hist_length = env_args['hist_length']
+        self.max_num_HDVs = args['max_num_HDVs']
+        self.max_num_CAVs = args['max_num_CAVs']
+        self.num_HDVs = args['num_HDVs']
+        self.num_CAVs = args['num_CAVs']
+        self.hist_length = args['hist_length']
         # 单个智能体obs_dim
         self.obs_dim = obs_dim
         # 单个智能体action_dim
         self.action_dim = action_dim
         self.n_embd = n_embd
         self.action_type = action_type
-        self.para_env = train_args['train']['n_rollout_threads']
+        self.para_env = args['n_rollout_threads']
 
         self.gat_CAV_1a = GAT(nfeat=6, nhid=16, nclass=64, dropout=0.1, alpha=0.2, nheads=1)
         self.gat_HDV_5s = GAT(nfeat=3*5, nhid=32, nclass=64, dropout=0.1, alpha=0.2, nheads=1)

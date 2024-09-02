@@ -5,10 +5,9 @@ from harl.models.base.cnn import CNNBase
 from harl.models.base.mlp import MLPBase
 from harl.models.base.self_attention_multi_head import Encoder  # multi head self attention
 from harl.models.base.hierarchical_state_rep import Hierarchical_state_rep
-from harl.models.base.prediction_rep import Prediction_rep
+# from harl.models.base.prediction_rep import Prediction_rep
 from harl.models.base.cross_aware_rep import Cross_aware_rep
 from harl.models.base.TIE_rep import TIE_rep
-from harl.models.base.prediction import Prediction
 from harl.models.base.rnn import RNNLayer
 from harl.models.base.act import ACTLayer
 from harl.utils.envs_tools import get_shape_from_obs_space
@@ -28,13 +27,7 @@ class StochasticPolicy(nn.Module):
             device: (torch.device) specifies the device to run on (cpu/gpu).
         """
         super(StochasticPolicy, self).__init__()
-        # Load the environment arguments
-        env_args = yaml.load(
-            open('/home/spyder/projects/zhengxuan_projects/Mixed_traffic/HARL/harl/configs/envs_cfgs/bottleneck_attack.yaml',
-                 'r'),
-            Loader=yaml.FullLoader)
-        self.env_args = copy.deepcopy(env_args)
-        self.strategy = env_args['strategy']
+        self.strategy = args['strategy']
         self.hidden_sizes = args["hidden_sizes"]  # MLP隐藏层神经元数量
         self.args = args  # yaml里面的model和algo的config打包
         self.gain = args["gain"]  # 激活函数的斜率或增益，增益较大的激活函数会更敏感地响应输入的小变化，而增益较小的激活函数则会对输入的小变化不那么敏感
@@ -55,18 +48,17 @@ class StochasticPolicy(nn.Module):
         self.attention = Encoder(obs_shape[0], action_space.n, 1, self.hidden_sizes[-1], 4, 'Discrete')
         self.hierarchical = Hierarchical_state_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
         self.tie_rep = TIE_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
-        self.prediction = Prediction(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
         # self.prediction = Prediction_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
         self.cross_aware = Cross_aware_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
-        self.num_CAVs = self.env_args['num_CAVs']
-        self.num_HDVs = self.env_args['num_HDVs']
+        self.num_CAVs = args['num_CAVs']
+        self.num_HDVs = args['num_HDVs']
         self.CAV_ids = [f'CAV_{i}' for i in range(self.num_CAVs)]
         self.HDV_ids = [f'HDV_{i}' for i in range(self.num_HDVs)]
         self.veh_ids = self.CAV_ids + self.HDV_ids
-        if self.strategy == 'prediction':
-            self.prediction_output = {}
-            for i in range(3):
-                self.prediction_output[f'hist_{i + 1}'] = {veh_id: {pre_id: [] for pre_id in self.veh_ids} for veh_id in self.CAV_ids}
+        # if self.strategy == 'prediction':
+        #     self.prediction_output = {}
+        #     for i in range(3):
+        #         self.prediction_output[f'hist_{i + 1}'] = {veh_id: {pre_id: [] for pre_id in self.veh_ids} for veh_id in self.CAV_ids}
         # 如果使用RNN，初始化RNN层
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             self.rnn = RNNLayer(
@@ -118,10 +110,12 @@ class StochasticPolicy(nn.Module):
             actor_features = self.attention(obs)
         elif self.strategy == 'hierarchical':
             actor_features = self.hierarchical(obs, batch_size=obs.size(0))
-        elif self.strategy == 'prediction':
-            actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
+        # elif self.strategy == 'prediction':
+        #     actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
         elif self.strategy == 'cross_aware':
             actor_features = self.cross_aware(obs, batch_size=obs.size(0))
+        elif self.strategy == 'DIACC':
+            actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
 
         # 如果使用RNN，将特征和RNN状态输入RNN层，得到新的特征和RNN状态
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
@@ -131,94 +125,17 @@ class StochasticPolicy(nn.Module):
         actions, action_log_probs = self.act(
             actor_features, available_actions, deterministic
         )
-        # prediction_loss & action_loss
-        prediction_error_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
+        # action_loss
         action_loss_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
-        if self.strategy == 'prediction':
-            # future_states, ego_id, prediction_groundtruth = self.prediction(reconstruct_info, actions, batch_size=obs.size(0))
-            # action_is_zero = (reconstruct_info[7] == 0)
-            # action_all_zero = torch.all(action_is_zero)
-            # ego2cav_is_zero = (reconstruct_info[9] == 0)
-            # ego2cav_all_zero = torch.all(ego2cav_is_zero)
-            # ego2hdv_is_zero = (reconstruct_info[10] == 0)
-            # ego2hdv_all_zero = torch.all(ego2hdv_is_zero)
-            # all_zero = action_all_zero and ego2cav_all_zero and ego2hdv_all_zero
-            # if all_zero:
-            #     self.prediction_output['hist_3'][ego_id] = {pre_id: [] for pre_id in self.veh_ids}
-            #     self.prediction_output['hist_2'][ego_id] = {pre_id: [] for pre_id in self.veh_ids}
-            #     self.prediction_output['hist_1'][ego_id] = {pre_id: [] for pre_id in self.veh_ids}
-            # prediction_error_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
-            # prediction_error = {}
-            # prediction_mae_error = {}
-            # if ego_id:
-            #     for i in range(3):
-            #         prediction_error[f'hist_{i + 1}'] = {pre_id: [] for pre_id in self.veh_ids}
-            #         prediction_mae_error[f'hist_{i + 1}'] = {key: torch.zeros(env_num, 1, device=self.tpdv['device']) for key in self.veh_ids}
-            #     if len(ego_id) > 10:
-            #         print('ego_id:', ego_id)
-            #     for veh_id in self.veh_ids:
-            #         if self.prediction_output['hist_1'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
-            #             if prediction_groundtruth[veh_id].size() != self.prediction_output['hist_1'][ego_id][veh_id][:, 0, :].size():
-            #                 continue
-            #             else:
-            #                 prediction_error['hist_1'][veh_id] = self.prediction_output['hist_1'][ego_id][veh_id][:, 0, :] - \
-            #                                                      prediction_groundtruth[veh_id][:, :] if self.prediction_output['hist_1'][ego_id][veh_id][:, 0, :] != [0, 0, 0] else [0, 0, 0]
-            #                 # prediction_mse_error[veh_id] = torch.mean(torch.pow(self.prediction_error['hist_1'][ego_id][veh_id], 2), dim=1, keepdim=True)
-            #                 prediction_mae_error['hist_1'][veh_id] = torch.mean(torch.abs(prediction_error['hist_1'][veh_id]), dim=1, keepdim=True)
-            #         else:
-            #             prediction_error['hist_1'][veh_id] = []
-            #         if self.prediction_output['hist_2'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
-            #             if prediction_groundtruth[veh_id].size() != self.prediction_output['hist_2'][ego_id][veh_id][:, 1, :].size():
-            #                 continue
-            #             else:
-            #                 prediction_error['hist_2'][veh_id] = self.prediction_output['hist_2'][ego_id][veh_id][:, 1, :] - \
-            #                                                      prediction_groundtruth[veh_id][:, :] if self.prediction_output['hist_2'][ego_id][veh_id][:, 1, :] != [0, 0, 0] else [0, 0, 0]
-            #                 # prediction_mse_error[veh_id] = torch.mean(torch.pow(self.prediction_error['hist_2'][ego_id][veh_id], 2), dim=1, keepdim=True)
-            #                 prediction_mae_error['hist_2'][veh_id] = torch.mean(torch.abs(prediction_error['hist_2'][veh_id]), dim=1, keepdim=True)
-            #         else:
-            #             prediction_error['hist_2'][veh_id] = []
-            #         if self.prediction_output['hist_3'][ego_id][veh_id] != [] and prediction_groundtruth[veh_id] != []:
-            #             if prediction_groundtruth[veh_id].size() != self.prediction_output['hist_3'][ego_id][veh_id][:, 2, :].size():
-            #                 continue
-            #             else:
-            #                 prediction_error['hist_3'][veh_id] = self.prediction_output['hist_3'][ego_id][veh_id][:, 2, :] - \
-            #                                                      prediction_groundtruth[veh_id][:, :] if self.prediction_output['hist_3'][ego_id][veh_id][:, 2, :] != [0, 0, 0] else [0, 0, 0]
-            #                 # prediction_mse_error[veh_id] = torch.mean(torch.pow(self.prediction_error['hist_3'][ego_id][veh_id], 2), dim=1, keepdim=True)
-            #                 prediction_mae_error['hist_3'][veh_id] = torch.mean(torch.abs(prediction_error['hist_3'][veh_id]), dim=1, keepdim=True)
-            #         else:
-            #             prediction_error['hist_3'][veh_id] = []
-            #
-            #     for i in range(env_num):
-            #         error_cumulative = 0
-            #         veh_count = 0
-            #         for veh_id in self.veh_ids:
-            #             if prediction_mae_error['hist_1'][veh_id][i, 0] != 0 and veh_id != ego_id:
-            #                 error_cumulative += prediction_mae_error['hist_1'][veh_id][i, 0]  # prediction_mse_error
-            #                 veh_count += 1
-            #             if prediction_mae_error['hist_2'][veh_id][i, 0] != 0 and veh_id != ego_id:
-            #                 error_cumulative += prediction_mae_error['hist_2'][veh_id][i, 0]  # prediction_mse_error
-            #                 veh_count += 1
-            #             if prediction_mae_error['hist_3'][veh_id][i, 0] != 0 and veh_id != ego_id:
-            #                 error_cumulative += prediction_mae_error['hist_3'][veh_id][i, 0]  # prediction_mse_error
-            #                 veh_count += 1
-            #         if veh_count != 0:
-            #             prediction_error_output[i, 0] = error_cumulative / veh_count
-            #         else:
-            #             prediction_error_output[i, 0] = 0
-            #     self.prediction_output['hist_3'][ego_id] = self.prediction_output['hist_2'][ego_id]
-            #     self.prediction_output['hist_2'][ego_id] = self.prediction_output['hist_1'][ego_id]
-            #     self.prediction_output['hist_1'][ego_id] = future_states
+        # last_actor_action = reconstruct_info[7]
+        # last_actual_action = reconstruct_info[8]
+        # action_mse_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
+        # action_cosine_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
+        # action_mse_loss[:, 0] = torch.mean((last_actor_action[:, 0, 0] - last_actual_action[:, 0, 0]) ** 2)
+        # action_cosine_loss[:, 0] = 1 - torch.nn.functional.cosine_similarity(last_actor_action[:, 0, 0], last_actual_action[:, 0, 0], dim=-1).mean()
+        # action_loss_output[:, 0] = action_cosine_loss[:, 0]  # action_mse_loss[:, 0]
 
-            last_actor_action = reconstruct_info[7]
-            last_actual_action = reconstruct_info[8]
-            action_mse_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
-            # action_cosine_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
-            action_mse_loss[:, 0] = torch.mean((last_actor_action[:, 0, 0] - last_actual_action[:, 0, 0]) ** 2)
-            # action_cosine_loss[:, 0] = 1 - torch.nn.functional.cosine_similarity(last_actor_action[:, 0, 0], last_actual_action[:, 0, 0], dim=-1).mean()
-            action_loss_output[:, 0] = action_mse_loss[:, 0]
-
-
-        return actions, action_log_probs, rnn_states, prediction_error_output, action_loss_output
+        return actions, action_log_probs, rnn_states, action_loss_output
 
     def evaluate_actions(
             self, obs, rnn_states, action, masks, available_actions=None, active_masks=None
@@ -257,10 +174,10 @@ class StochasticPolicy(nn.Module):
             actor_features = self.attention(obs)
         elif self.strategy == 'hierarchical':
             actor_features = self.hierarchical(obs, batch_size=obs.size(0))
-        elif self.strategy == 'prediction':
-            actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
         elif self.strategy == 'cross_aware':
             actor_features = self.cross_aware(obs, batch_size=obs.size(0))
+        elif self.strategy == 'DIACC':
+            actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
 
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)

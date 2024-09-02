@@ -15,11 +15,11 @@ train:
   # number of parallel environments for training data collection
   n_rollout_threads: 10
   # number of total training steps
-  num_env_steps: 5000000
+  num_env_steps: 3000000
   # number of steps per environment per training data collection
   episode_length: 100
   # logging interval
-  log_interval: 10
+  log_interval: 5
   # evaluation interval
   eval_interval: 25
   # whether to use ValueNorm
@@ -48,6 +48,9 @@ model:
   hidden_sizes: [128, 256, 64]
   # activation function, choose from sigmoid, tanh, relu, leaky_relu, selu
   activation_func: leaky_relu
+  # weights of the loss terms
+  action_loss_subzone: [0, 0.5, 1.0]
+  action_loss_weight: [0.0, 0.0, 0.0]
   # whether to use feature normalization
   use_feature_normalization: True
   # initialization method for network parameters, choose from xavier_uniform_, orthogonal_, ...

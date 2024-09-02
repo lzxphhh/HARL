@@ -13,13 +13,13 @@ device:
   torch_threads: 4
 train:
   # number of parallel environments for training data collection
-  n_rollout_threads: 20
+  n_rollout_threads: 10
   # number of total training steps
   num_env_steps: 3000000
   # number of steps per environment per training data collection
   episode_length: 100
   # logging interval
-  log_interval: 5
+  log_interval: 10
   # evaluation interval
   eval_interval: 25
   # whether to use ValueNorm
@@ -45,10 +45,9 @@ render:
 model:
   # network parameters
   # hidden sizes for mlp module in the network
-  hidden_sizes: [64, 64, 64]
+  hidden_sizes: [128, 256, 64]
   # activation function, choose from sigmoid, tanh, relu, leaky_relu, selu
   activation_func: leaky_relu
-  critic_hidden_sizes: [64, 64, 64]
   # whether to use feature normalization
   use_feature_normalization: True
   # initialization method for network parameters, choose from xavier_uniform_, orthogonal_, ...

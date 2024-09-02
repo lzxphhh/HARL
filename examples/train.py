@@ -11,7 +11,7 @@ copy-paste
 
 """
 --algo <ALGO> --env <ENV> --exp_name <EXPERIMENT NAME>
---algo mappo --env bottleneck_attack --exp_name 0809_MAPPO_improve
+--algo mappo --env bottleneck --exp_name DIACC_models
 --algo happo --env bottleneck --exp_name 0721_HIAHR_DIU_happo
 or
 --load_config <TUNED CONFIG PATH> --exp_name <EXPERIMENT NAME>
@@ -56,6 +56,7 @@ def main():
             "lag",
             "metadrive",
             "bottleneck",
+            "bottleneck_new",
             "bottleneck_attack",
         ],
         help="Environment name. Choose from: smac, mamujoco, pettingzoo_mpe, gym, football, dexhands, smacv2, lag.",
