@@ -646,11 +646,12 @@ class OnPolicyBaseRunner:
 
         # 插入critic_buffer
         if self.state_type == "EP":
+            min_rewards = np.min(rewards, axis=1)
             self.critic_buffer.insert(
                 share_obs[:, 0],
                 rnn_states_critic,
                 values,
-                rewards[:, 0],
+                min_rewards, # rewards[:, 0],   #TODO：这里的rewards是不是有问题?
                 masks[:, 0],
                 bad_masks,
             )
