@@ -104,6 +104,7 @@ class StochasticPolicy(nn.Module):
 
         # 用base提取特征-输入大小obs_shape，输出大小hidden_sizes[-1], eg: TensorShape([20, 120]) 并行环境数量 x hidden_sizes[-1]
         env_num = obs.size(0)
+        # start = time.time()
         if self.strategy == 'base':
             actor_features = self.base(obs)
         elif self.strategy == 'attention':
@@ -117,6 +118,8 @@ class StochasticPolicy(nn.Module):
         elif self.strategy == 'DIACC':
             actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
 
+        # end = time.time()
+        # print(f'forward time: {end - start} second')
         # 如果使用RNN，将特征和RNN状态输入RNN层，得到新的特征和RNN状态
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
@@ -127,13 +130,13 @@ class StochasticPolicy(nn.Module):
         )
         # action_loss
         action_loss_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
-        # last_actor_action = reconstruct_info[7]
-        # last_actual_action = reconstruct_info[8]
-        # action_mse_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
+        last_actor_action = reconstruct_info[7]
+        last_actual_action = reconstruct_info[8]
+        action_mse_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
         # action_cosine_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
-        # action_mse_loss[:, 0] = torch.mean((last_actor_action[:, 0, 0] - last_actual_action[:, 0, 0]) ** 2)
+        action_mse_loss[:, 0] = torch.mean((last_actor_action[:, 0, 0] - last_actual_action[:, 0, 0]) ** 2)
         # action_cosine_loss[:, 0] = 1 - torch.nn.functional.cosine_similarity(last_actor_action[:, 0, 0], last_actual_action[:, 0, 0], dim=-1).mean()
-        # action_loss_output[:, 0] = action_cosine_loss[:, 0]  # action_mse_loss[:, 0]
+        action_loss_output[:, 0] = action_mse_loss[:, 0]
 
         return actions, action_log_probs, rnn_states, action_loss_output
 

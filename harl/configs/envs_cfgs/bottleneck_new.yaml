@@ -51,5 +51,5 @@ normal: 0.6
 
 # 5_0.5: 0.1 + 40
 # sum:10-44, 15-52, 20-58, 25-63, 30-70, 40-82
-save_collision: 0.2
-save_episode_step: 52
+save_collision: 0.1
+save_episode_step: 45
