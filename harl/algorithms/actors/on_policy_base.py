@@ -70,10 +70,10 @@ class OnPolicyBase:
             action_log_probs: (torch.Tensor) log probabilities of actions. 【thread_num, 1】
             rnn_states_actor: (torch.Tensor) updated RNN states for actor. 【thread_num, rnn层数，rnn_state_dim】
         """
-        actions, action_log_probs, rnn_states_actor, action_loss = self.actor(
+        actions, action_log_probs, rnn_states_actor, action_loss, speed, acceleration = self.actor(
             obs, rnn_states_actor, masks, available_actions, deterministic
         )
-        return actions, action_log_probs, rnn_states_actor, action_loss
+        return actions, action_log_probs, rnn_states_actor, action_loss, speed, acceleration
 
     def evaluate_actions(
         self,
@@ -116,7 +116,7 @@ class OnPolicyBase:
                                     (if None, all actions available)
             deterministic: (bool) whether the action should be mode of distribution or should be sampled.
         """
-        actions, _, rnn_states_actor, action_loss = self.actor(
+        actions, _, rnn_states_actor, action_loss, speed, acceleration = self.actor(
             obs, rnn_states_actor, masks, available_actions, deterministic
         )
         return actions, rnn_states_actor

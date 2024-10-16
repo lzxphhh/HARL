@@ -58,6 +58,7 @@ def main():
             "bottleneck",
             "bottleneck_new",
             "bottleneck_attack",
+            "a_single_lane",
         ],
         help="Environment name. Choose from: smac, mamujoco, pettingzoo_mpe, gym, football, dexhands, smacv2, lag.",
     )

@@ -78,6 +78,18 @@ class StochasticPolicy(nn.Module):
         )
 
         self.to(device)
+        self.example_extend_info = {
+            'road_structure': torch.zeros(8),  # 0
+            'next_node': torch.zeros(3),  # 1
+            'self_stats': torch.zeros(1, 10),  # 2
+            'surround_stats': torch.zeros(2, 6),  # 3
+            'ego_lane_stats': torch.zeros(1, 6),  # 4
+        }
+
+    def reconstruct_info(self, obs):
+        reconstructed = self.reconstruct_obs_batch(obs, self.example_extend_info)
+        return reconstructed['road_structure'], reconstructed['next_node'], reconstructed['self_stats'], \
+            reconstructed['surround_stats'], reconstructed['ego_lane_stats']
 
     def forward(
             self, obs, rnn_states, masks, available_actions=None, deterministic=False
@@ -117,6 +129,8 @@ class StochasticPolicy(nn.Module):
             actor_features = self.cross_aware(obs, batch_size=obs.size(0))
         elif self.strategy == 'DIACC':
             actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
+        elif self.strategy == 'iMARL':
+            actor_features = self.base(obs)
 
         # end = time.time()
         # print(f'forward time: {end - start} second')
@@ -128,17 +142,22 @@ class StochasticPolicy(nn.Module):
         actions, action_log_probs = self.act(
             actor_features, available_actions, deterministic
         )
+        info_current = self.reconstruct_info(obs)
+        ego_speed = info_current[2][:, :, 3:4] * 20
+        ego_speed = ego_speed.squeeze(-1)
+        ego_acceleration = abs(info_current[2][:, :, 4:5]) * 6
+        ego_acceleration = ego_acceleration.squeeze(-1)
         # action_loss
         action_loss_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
-        last_actor_action = reconstruct_info[7]
-        last_actual_action = reconstruct_info[8]
-        action_mse_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
-        # action_cosine_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
-        action_mse_loss[:, 0] = torch.mean((last_actor_action[:, 0, 0] - last_actual_action[:, 0, 0]) ** 2)
-        # action_cosine_loss[:, 0] = 1 - torch.nn.functional.cosine_similarity(last_actor_action[:, 0, 0], last_actual_action[:, 0, 0], dim=-1).mean()
-        action_loss_output[:, 0] = action_mse_loss[:, 0]
+        # last_actor_action = reconstruct_info[7]
+        # last_actual_action = reconstruct_info[8]
+        # action_mse_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
+        # # action_cosine_loss = torch.zeros(env_num, 1, device=self.tpdv['device'])
+        # action_mse_loss[:, 0] = torch.mean((last_actor_action[:, 0, 0] - last_actual_action[:, 0, 0]) ** 2)
+        # # action_cosine_loss[:, 0] = 1 - torch.nn.functional.cosine_similarity(last_actor_action[:, 0, 0], last_actual_action[:, 0, 0], dim=-1).mean()
+        # action_loss_output[:, 0] = action_mse_loss[:, 0]
 
-        return actions, action_log_probs, rnn_states, action_loss_output
+        return actions, action_log_probs, rnn_states, action_loss_output, ego_speed, ego_acceleration
 
     def evaluate_actions(
             self, obs, rnn_states, action, masks, available_actions=None, active_masks=None
@@ -181,6 +200,8 @@ class StochasticPolicy(nn.Module):
             actor_features = self.cross_aware(obs, batch_size=obs.size(0))
         elif self.strategy == 'DIACC':
             actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
+        elif self.strategy == 'iMARL':
+            actor_features = self.base(obs)
 
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
@@ -193,3 +214,26 @@ class StochasticPolicy(nn.Module):
         )
 
         return action_log_probs, dist_entropy, action_distribution
+
+    def reconstruct_obs_batch(self, obs_batch, template_structure):
+        device = obs_batch.device  # Get the device of obs_batch
+
+        # Initialize the reconstructed_batch with the same structure as template_structure
+        reconstructed_batch = {
+            key: torch.empty((obs_batch.size(0),) + tensor.shape, device=device)
+            for key, tensor in template_structure.items()
+        }
+
+        # Compute the cumulative sizes of each tensor in the template structure
+        sizes = [tensor.numel() for tensor in template_structure.values()]
+        cumulative_sizes = torch.cumsum(torch.tensor(sizes), dim=0)
+        indices = [0] + cumulative_sizes.tolist()[:-1]
+
+        # Split obs_batch into chunks based on the cumulative sizes
+        split_tensors = torch.split(obs_batch, sizes, dim=1)
+
+        # Assign the split tensors to the appropriate keys in the reconstructed_batch
+        for key, split_tensor in zip(template_structure.keys(), split_tensors):
+            reconstructed_batch[key] = split_tensor.view((-1,) + template_structure[key].shape)
+
+        return reconstructed_batch

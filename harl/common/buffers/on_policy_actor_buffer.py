@@ -84,6 +84,12 @@ class OnPolicyActorBuffer:
         self.action_losss = np.zeros(
             (self.episode_length, self.n_rollout_threads, 1), dtype=np.float32
         )
+        self.speeds = np.zeros(
+            (self.episode_length, self.n_rollout_threads, 1), dtype=np.float32
+        )
+        self.accelerations = np.zeros(
+            (self.episode_length, self.n_rollout_threads, 1), dtype=np.float32
+        )
 
         # Buffer for masks of this actor. Masks denotes at which point should the rnn states be reset.
         # 当前这个agent在不同并行环境的不同时间点是否done，如果done，那么就需要reset rnn
@@ -111,6 +117,8 @@ class OnPolicyActorBuffer:
         actions,
         action_log_probs,
         action_losss,
+        speeds,
+        accelerations,
         masks,
         active_masks=None,
         available_actions=None,
@@ -121,6 +129,8 @@ class OnPolicyActorBuffer:
         self.actions[self.step] = actions.copy()
         self.action_log_probs[self.step] = action_log_probs.copy()
         self.action_losss[self.step] = action_losss.copy()
+        self.speeds[self.step] = speeds.copy()
+        self.accelerations[self.step] = accelerations.copy()
         self.masks[self.step + 1] = masks.copy()
         if active_masks is not None:
             self.active_masks[self.step + 1] = active_masks.copy()

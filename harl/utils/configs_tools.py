@@ -72,6 +72,8 @@ def get_task_name(env, env_args):
         task = f"{env_args['scenario']}"
     elif env == "bottleneck_attack":
         task = f"{env_args['scenario']}"
+    elif env == "a_single_lane":
+        task = f"{env_args['scenario']}"
     return task
 
 

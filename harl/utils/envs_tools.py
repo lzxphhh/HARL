@@ -109,6 +109,10 @@ def make_train_env(env_name, seed, n_threads, env_args):
                 from harl.envs.bottleneck_attack.bottleneck_env import BOTTLENECKEnv
 
                 env = BOTTLENECKEnv(env_args)
+            elif env_name == "a_single_lane":
+                from harl.envs.a_single_lane.singlelane_env import SingleLaneEnv
+
+                env = SingleLaneEnv(env_args)
             else:
                 print("Can not support the " + env_name + "environment.")
                 raise NotImplementedError
@@ -177,6 +181,10 @@ def make_eval_env(env_name, seed, n_threads, env_args):
                 from harl.envs.bottleneck_attack.bottleneck_env import BOTTLENECKEnv
 
                 env = BOTTLENECKEnv(env_args)
+            elif env_name == "a_single_lane":
+                from harl.envs.a_single_lane.singlelane_env import SingleLaneEnv
+
+                env = SingleLaneEnv(env_args)
             else:
                 print("Can not support the " + env_name + "environment.")
                 raise NotImplementedError
@@ -269,6 +277,12 @@ def make_render_env(env_name, seed, env_args):
         env = BOTTLENECKEnv(env_args)
         manual_render = False
         env.seed(seed * 60000)
+    elif env_name == "a_single_lane":
+        from harl.envs.a_single_lane.singlelane_env import SingleLaneEnv
+
+        env = SingleLaneEnv(env_args)
+        manual_render = False
+        env.seed(seed * 60000)
     else:
         print("Can not support the " + env_name + "environment.")
         raise NotImplementedError
@@ -312,4 +326,6 @@ def get_num_agents(env, env_args, envs):
     elif env == "bottleneck_new":
         return envs.n_agents
     elif env == "bottleneck_attack":
+        return envs.n_agents
+    elif env == "a_single_lane":
         return envs.n_agents

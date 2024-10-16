@@ -101,9 +101,9 @@ class VNet(nn.Module):
         masks = check(masks).to(**self.tpdv)
 
         # 用base提取特征-输入大小obs_shape，输出大小hidden_sizes[-1], eg: TensorShape([20, 120]) 并行环境数量 x hidden_sizes[-1]
-        # critic_features = self.base(cent_obs)
+        critic_features = self.base(cent_obs)
         # critic_features = self.hierarchical_net(cent_obs)
-        critic_features = self.cross_aware_new(cent_obs)
+        # critic_features = self.cross_aware_new(cent_obs)
 
         # 如果使用RNN，将特征和RNN状态输入RNN层，得到新的特征和RNN状态
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:

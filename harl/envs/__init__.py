@@ -10,6 +10,7 @@ from harl.envs.lag.lag_logger import LAGLogger
 from harl.envs.bottleneck.bottleneck_logger import BottleneckLogger
 from harl.envs.bottleneck_new.bottleneck_logger import BottleneckLogger
 from harl.envs.bottleneck_attack.bottleneck_attack_logger import BottleneckAttackLogger
+from harl.envs.a_single_lane.singlelane_logger import SingleLaneLogger
 
 FLAGS = flags.FLAGS
 FLAGS(["train_sc.py"])
@@ -26,4 +27,5 @@ LOGGER_REGISTRY = {
     "bottleneck": BottleneckLogger,
     "bottleneck_new": BottleneckLogger,
     "bottleneck_attack": BottleneckAttackLogger,
+    "a_single_lane": SingleLaneLogger,
 }

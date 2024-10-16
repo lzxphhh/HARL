@@ -1,0 +1,50 @@
+scenario: single-lane
+task: rmappo_16_0.4
+
+sumo_cfg: "env_utils/SUMO_files/scenario.sumocfg"
+max_num_seconds: 100
+vehicle_action_type: "lane_continuous_speed"
+use_gui: False
+
+# for veh wrapper
+scene_name: "Env_SingleLane"
+max_num_CAVs: 32
+max_num_HDVs: 32
+num_CAVs: 16  # num_CAVs/penetration_CAV should be an integer multiple of 10, except for penetration_CAV=1
+num_HDVs: 24
+lane_max_num_vehs: 15
+penetration_CAV: 0.4 # only 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1 are valid
+strategy: "base"  # "base" or "iMARL"
+use_hist_info: False
+hist_length: 0
+warmup_steps: 0
+edge_ids: [ 'E0', 'E1', 'E2', 'E3',]
+edge_lane_num: { 'E0': 1,
+                 'E1': 1,
+                 'E2': 1,
+                 'E3': 1,
+}  # 每一个 edge 对应的车道数
+node_positions: {'J0': [0, 0],
+                 'J1': [200, 0],
+                 'J2': [200, 200],
+                 'J3': [0,200] }  # nodes的坐标, 用于计算距离
+calc_features_lane_ids: ['E0_0',
+                         'E1_0',
+                         'E2_0',
+                         'E3_0',
+                         ]  # 计算对应的 lane 的信息
+log_path: './log/check_veh_env'
+delta_t: 1.0
+obs_size: "8 + 2 + 1 + 3 * 5 + 6"
+shared_obs_size: "4 * 2 + self.max_num_CAVs * 5 + 4 * 6"
+reward_weights: [(1-0.4)*1.0, (1-0.4)*0.05, (1-0.4)*0.05, 0.4*1.0, 1.0*1.0]
+reward_items: ['individual_speed_r_simple', 'individual_acc_r', 'individual_warn_r', 'individual_coll_r', 'global_ego_speed_r', 'global_ego_acc_r', 'time_penalty_ego']
+time_penalty_ego: "-1"
+
+# generate scene parameters-HDVs' driving style distribution
+aggressive: 0.2
+cautious: 0.2
+normal: 0.6
+
+save_collision: 0.1
+save_episode_mean_speed: 15
