@@ -169,7 +169,7 @@ def shareworker(remote, parent_remote, env_fn_wrapper):
     while True:
         cmd, data = remote.recv()
         if cmd == "step":
-            ob, s_ob, reward, done, info, available_actions = env.step(data)
+            ob, s_ob, reward, mean_speed, mean_acc, done, info, available_actions = env.step(data)
             if "bool" in done.__class__.__name__:  # done is a bool
                 if (
                     done
@@ -187,7 +187,7 @@ def shareworker(remote, parent_remote, env_fn_wrapper):
                     info[0]["original_avail_actions"] = copy.deepcopy(available_actions)
                     ob, s_ob, available_actions = env.reset()
 
-            remote.send((ob, s_ob, reward, done, info, available_actions))
+            remote.send((ob, s_ob, reward, mean_speed, mean_acc, done, info, available_actions))
         elif cmd == "reset":
             ob, s_ob, available_actions = env.reset()
             remote.send((ob, s_ob, available_actions))
@@ -260,11 +260,13 @@ class ShareSubprocVecEnv(ShareVecEnv):
     def step_wait(self):
         results = [remote.recv() for remote in self.remotes]
         self.waiting = False
-        obs, share_obs, rews, dones, infos, available_actions = zip(*results)
+        obs, share_obs, rews, mean_vs, mean_accs, dones, infos, available_actions = zip(*results)
         return (
             np.stack(obs),
             np.stack(share_obs),
             np.stack(rews),
+            np.stack(mean_vs),
+            np.stack(mean_accs),
             np.stack(dones),
             infos,
             np.stack(available_actions),
@@ -318,7 +320,7 @@ class ShareDummyVecEnv(ShareVecEnv):
 
     def step_wait(self):
         results = [env.step(a) for (a, env) in zip(self.actions, self.envs)]
-        obs, share_obs, rews, dones, infos, available_actions = map(
+        obs, share_obs, rews, mean_vs, mean_accs, dones, infos, available_actions = map(
             np.array, zip(*results)
         )
 
@@ -345,7 +347,7 @@ class ShareDummyVecEnv(ShareVecEnv):
                     obs[i], share_obs[i], available_actions[i] = self.envs[i].reset()
         self.actions = None
 
-        return obs, share_obs, rews, dones, infos, available_actions
+        return obs, share_obs, rews, mean_vs, mean_accs, dones, infos, available_actions
 
     def reset(self):
         results = [env.reset() for env in self.envs]

@@ -117,8 +117,8 @@ class OnPolicyActorBuffer:
         actions,
         action_log_probs,
         action_losss,
-        speeds,
-        accelerations,
+        mean_v,
+        mean_acc,
         masks,
         active_masks=None,
         available_actions=None,
@@ -129,8 +129,10 @@ class OnPolicyActorBuffer:
         self.actions[self.step] = actions.copy()
         self.action_log_probs[self.step] = action_log_probs.copy()
         self.action_losss[self.step] = action_losss.copy()
-        self.speeds[self.step] = speeds.copy()
-        self.accelerations[self.step] = accelerations.copy()
+        mean_v = mean_v.reshape(-1, 1)
+        self.speeds[self.step] = mean_v.copy()
+        mean_acc = mean_acc.reshape(-1, 1)
+        self.accelerations[self.step] = mean_acc.copy()
         self.masks[self.step + 1] = masks.copy()
         if active_masks is not None:
             self.active_masks[self.step + 1] = active_masks.copy()

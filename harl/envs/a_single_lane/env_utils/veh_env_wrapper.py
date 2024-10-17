@@ -788,10 +788,10 @@ class VehEnvWrapper(gym.Wrapper):
                 # inidividual_rew_ego[veh_id] += 1 * individual_speed_r
 
                 # CAV车辆的target速度越靠近最大速度，reward越高 - [0, 5]
-                individual_speed_r_simple = (-abs(speed - max_speed) / max_speed * 5 + 5) * 1
+                individual_speed_r_simple = (-abs(speed - max_speed) / max_speed * 5 + 5) * 2
                 inidividual_rew_ego[veh_id] += individual_speed_r_simple
                 # CAV车辆的加速度绝对值越小，reward越高 - [0, 6]
-                individual_acceleration_r = -abs(acceleration) + 6
+                individual_acceleration_r = (-abs(acceleration) + 6) * 1
                 inidividual_rew_ego[veh_id] += individual_acceleration_r
 
                 # # CAV车辆的等待时间越短，reward越高 - (-infty,0]
@@ -829,9 +829,9 @@ class VehEnvWrapper(gym.Wrapper):
         # all_ego_vehicle_accumulated_waiting_time = np.mean(all_ego_vehicle_accumulated_waiting_time)  # CAV车辆的累积平均等待时间
         # all_ego_vehicle_waiting_time = np.mean(all_ego_vehicle_waiting_time)  # CAV车辆的mean等待时间
 
-        # all_vehicle_speed = np.mean(all_vehicle_speed)  # CAV和HDV车辆的平均速度 - 使用target speed
+        all_vehicle_speed = np.mean(all_vehicle_speed)  # CAV和HDV车辆的平均速度 - 使用target speed
         # all_vehicle_mean_speed = np.mean(all_vehicle_mean_speed)  # CAV和HDV车辆的累积平均速度 - 使用速度/时间
-        # all_vehicle_acceleration = np.mean(all_vehicle_acceleration)  # CAV和HDV车辆的平均加速度
+        all_vehicle_acceleration = np.mean(all_vehicle_acceleration)  # CAV和HDV车辆的平均加速度
         # all_vehicle_accumulated_waiting_time = np.mean(all_vehicle_accumulated_waiting_time)  # CAV和HDV车辆的累积平均等待时间
         # all_vehicle_waiting_time = np.mean(all_vehicle_waiting_time)  # CAV和HDV车辆的mean等待时间
 
@@ -875,7 +875,7 @@ class VehEnvWrapper(gym.Wrapper):
                         + time_penalty
                    for key in inidividual_rew_ego}
 
-        return rewards
+        return rewards, all_vehicle_speed, all_vehicle_acceleration
 
     # ############
     # Collision
@@ -1079,11 +1079,11 @@ class VehEnvWrapper(gym.Wrapper):
         # 处理 dones 和 infos
         if len(self.coll_ego_ids) == 0 and len(feature_vectors) > 0:  # 还有车在路上 且还没有碰撞发生
             # 计算此时的reward （这里的reward只有还在路网上的车的reward）
-            rewards = self.reward_wrapper(lane_statistics, ego_statistics, reward_statistics)
+            rewards, mean_speeds, mean_accelerations = self.reward_wrapper(lane_statistics, ego_statistics, reward_statistics)
 
         elif len(self.coll_ego_ids) > 0 and len(feature_vectors) > 0:  # 还有车在路上 但有车辆碰撞
             # 计算此时的reward
-            rewards = self.reward_wrapper(lane_statistics, ego_statistics, reward_statistics)  # 更新 veh info
+            rewards, mean_speeds, mean_accelerations = self.reward_wrapper(lane_statistics, ego_statistics, reward_statistics)  # 更新 veh info
             for collid_ego_id in self.coll_ego_ids:
                 infos['collision'].append(collid_ego_id)
                 self.agent_mask[collid_ego_id] = False
@@ -1117,7 +1117,7 @@ class VehEnvWrapper(gym.Wrapper):
         # 处理以下reward
         if len(self.out_of_road) > 0 and len(feature_vectors) > 0:
             for out_of_road_ego_id in self.out_of_road:
-                rewards.update({out_of_road_ego_id: 20.0})  # 离开路网之后 reward 也是 0  # TODO: 注意一下dead mask MARL
+                rewards.update({out_of_road_ego_id: 0.0})  # 离开路网之后 reward 也是 0  # TODO: 注意一下dead mask MARL
                 if out_of_road_ego_id not in infos['out_of_road']:
                     infos['out_of_road'].append(out_of_road_ego_id)
                 self.agent_mask[out_of_road_ego_id] = False
@@ -1179,7 +1179,7 @@ class VehEnvWrapper(gym.Wrapper):
         #     if len(value) != 253 or (not isinstance(value, np.ndarray)):
         #         print('break')
 
-        return feature_vectors_flatten, shared_features_flatten, rewards, dones.copy(), dones.copy(), infos
+        return feature_vectors_flatten, shared_features_flatten, rewards, mean_speeds, mean_accelerations, dones.copy(), dones.copy(), infos
 
     def close(self) -> None:
         return super().close()

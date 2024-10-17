@@ -80,15 +80,15 @@ class SingleLaneLogger(BaseLogger):
             rnn_states,
             rnn_states_critic,
             action_losss,
-            speeds,
-            accelerations,
+            mean_v,
+            mean_acc,
         ) = data
         # 并行环境中的每个环境是否done （n_env_threads, ）
         dones_env = np.all(dones, axis=1)
         # 并行环境中的每个环境的step reward （n_env_threads, ）
         reward_env = np.mean(rewards, axis=1).flatten()
-        speeds_env = np.mean(speeds, axis=1).flatten()
-        acceleration_env = np.mean(accelerations, axis=1).flatten()
+        speeds_env = mean_v
+        acceleration_env = mean_acc
         # 并行环境中的每个环境的episode reward （n_env_threads, ）累积
         self.train_episode_rewards += reward_env
         self.train_episode_mean_speed += speeds_env

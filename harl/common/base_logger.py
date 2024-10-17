@@ -124,10 +124,18 @@ class BaseLogger:
             * self.algo_args["train"]["n_rollout_threads"]
         )
         self.eval_episode_rewards = []
+        self.eval_episode_speeds = []
+        self.eval_episode_accelerations = []
         self.one_episode_rewards = []
+        self.one_episode_speed = []
+        self.one_episode_acceleration = []
         for eval_i in range(self.algo_args["eval"]["n_eval_rollout_threads"]):
             self.one_episode_rewards.append([])
+            self.one_episode_speed.append([])
+            self.one_episode_acceleration.append([])
             self.eval_episode_rewards.append([])
+            self.eval_episode_speeds.append([])
+            self.eval_episode_accelerations.append([])
 
     def eval_per_step(self, eval_data):
         """Log evaluation information per step."""
@@ -135,12 +143,16 @@ class BaseLogger:
             eval_obs,
             eval_share_obs,
             eval_rewards,
+            eval_speed,
+            eval_acceleration,
             eval_dones,
             eval_infos,
             eval_available_actions,
         ) = eval_data
         for eval_i in range(self.algo_args["eval"]["n_eval_rollout_threads"]):
             self.one_episode_rewards[eval_i].append(eval_rewards[eval_i])
+            self.one_episode_speed[eval_i].append(eval_speed[eval_i])
+            self.one_episode_acceleration[eval_i].append(eval_acceleration[eval_i])
         self.eval_infos = eval_infos
 
     def eval_thread_done(self, tid):
@@ -148,22 +160,44 @@ class BaseLogger:
         self.eval_episode_rewards[tid].append(
             np.sum(self.one_episode_rewards[tid], axis=0)
         )
+        self.eval_episode_speeds[tid].append(
+            np.mean(self.one_episode_speed[tid], axis=0)
+        )
+        self.eval_episode_accelerations[tid].append(
+            np.mean(self.one_episode_acceleration[tid], axis=0)
+        )
         self.one_episode_rewards[tid] = []
+        self.one_episode_speed[tid] = []
+        self.one_episode_acceleration[tid] = []
 
     def eval_log(self, eval_episode):
         """Log evaluation information."""
         self.eval_episode_rewards = np.concatenate(
             [rewards for rewards in self.eval_episode_rewards if rewards]
         )
+        self.eval_episode_speeds = np.concatenate(
+            [speeds for speeds in self.eval_episode_speeds if speeds]
+        )
+        self.eval_episode_accelerations = np.concatenate(
+            [accelerations for accelerations in self.eval_episode_accelerations if accelerations]
+        )
         eval_env_infos = {
             "eval_average_episode_rewards": self.eval_episode_rewards,
+            "eval_average_episode_speeds": self.eval_episode_speeds,
+            "eval_average_episode_accelerations": self.eval_episode_accelerations,
             "eval_max_episode_rewards": [np.max(self.eval_episode_rewards)],
+            "eval_mean_episode_speed": [np.mean(self.eval_episode_speeds)],
+            "eval_mean_episode_acceleration": [np.mean(self.eval_episode_accelerations)],
         }
         self.log_env(eval_env_infos)
         eval_avg_rew = np.mean(self.eval_episode_rewards)
         print("Evaluation average episode reward is {}.\n".format(eval_avg_rew))
+        eval_avg_speed = np.mean(self.eval_episode_speeds)
+        print("Evaluation average episode speed is {}.\n".format(eval_avg_speed))
+        eval_avg_acc = np.mean(self.eval_episode_accelerations)
+        print("Evaluation average episode acceleration is {}.\n".format(eval_avg_acc))
         self.log_file.write(
-            ",".join(map(str, [self.total_num_steps, eval_avg_rew])) + "\n"
+            ",".join(map(str, [self.total_num_steps, eval_avg_rew, eval_avg_speed, eval_avg_acc])) + "\n"
         )
         self.log_file.flush()
 

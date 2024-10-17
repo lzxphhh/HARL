@@ -3,7 +3,7 @@ seed:
   # whether to use the specified seed
   seed_specify: True
   # seed
-  seed: 42
+  seed: 1
 device:
   # whether to use CUDA
   cuda: True
@@ -13,7 +13,7 @@ device:
   torch_threads: 4
 train:
   # number of parallel environments for training data collection
-  n_rollout_threads: 10
+  n_rollout_threads: 20
   # number of total training steps
   num_env_steps: 3000000
   # number of steps per environment per training data collection
@@ -50,7 +50,7 @@ model:
   activation_func: leaky_relu
   # weights of the loss terms
   action_loss_subzone: [0, 0.5, 1.0]
-  action_loss_weight: [0.0, 0.0, 0.0]
+  action_loss_weight: [0, 0, 0]
   # whether to use feature normalization
   use_feature_normalization: True
   # initialization method for network parameters, choose from xavier_uniform_, orthogonal_, ...

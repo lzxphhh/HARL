@@ -96,12 +96,14 @@ class SingleLaneEnv:
         # for check
         # action_dict = {ego_id: actions[ego_id] for ego_id in self.env.ego_ids}
 
-        obs, s_obs, rew, truncated, done, info = self.env.step(action_dict)
+        obs, s_obs, rew, mean_v, mean_acc, truncated, done, info = self.env.step(action_dict)
 
         # s_obs = self.convert_shared_obs(obs)
         obs = list(obs.values())
         s_obs = list(s_obs.values())
         rew = np.array(list(rew.values())).reshape((-1, 1))
+        # mean_v = mean_v.reshape(-1, 1)
+        # mean_acc = mean_acc.reshape(1, -1)
         done = np.array(list(done.values()))
 
         self.action_command = self.env.action_command
@@ -111,7 +113,7 @@ class SingleLaneEnv:
         self.coll_ego_ids = self.env.coll_ego_ids
         self.total_timesteps = self.env.total_timesteps
 
-        return obs, s_obs, rew, done, self.repeat(info), self.get_avail_actions()
+        return obs, s_obs, rew, mean_v, mean_acc, done, self.repeat(info), self.get_avail_actions()
 
     def reset(self):
         """Returns initial observations and states"""
