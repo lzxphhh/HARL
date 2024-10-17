@@ -768,7 +768,7 @@ class VehEnvWrapper(gym.Wrapper):
             # CAV和HDV车辆的
             all_vehicle_speed.append(speed)
             all_vehicle_mean_speed.append(distance / veh_travel_time)
-            all_vehicle_acceleration.append(acceleration)
+            all_vehicle_acceleration.append(abs(acceleration))
             all_vehicle_accumulated_waiting_time.append(accumulated_waiting_time)
             all_vehicle_waiting_time.append(waiting_time)
 
@@ -778,7 +778,7 @@ class VehEnvWrapper(gym.Wrapper):
                 # for group reward 计算CAV车辆的累积平均速度
                 all_ego_vehicle_speed.append(speed)
                 all_ego_vehicle_mean_speed.append(distance / veh_travel_time)
-                all_ego_vehicle_acceleration.append(acceleration)
+                all_ego_vehicle_acceleration.append(abs(acceleration))
                 all_ego_vehicle_accumulated_waiting_time.append(accumulated_waiting_time)
                 all_ego_vehicle_waiting_time.append(waiting_time)
 
