@@ -157,7 +157,7 @@ class StochasticPolicy(nn.Module):
         # # action_cosine_loss[:, 0] = 1 - torch.nn.functional.cosine_similarity(last_actor_action[:, 0, 0], last_actual_action[:, 0, 0], dim=-1).mean()
         # action_loss_output[:, 0] = action_mse_loss[:, 0]
 
-        return actions, action_log_probs, rnn_states, action_loss_output, ego_speed, ego_acceleration
+        return actions, action_log_probs, rnn_states, action_loss_output
 
     def evaluate_actions(
             self, obs, rnn_states, action, masks, available_actions=None, active_masks=None
