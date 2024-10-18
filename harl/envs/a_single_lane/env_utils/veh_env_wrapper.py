@@ -127,30 +127,40 @@ class VehEnvWrapper(gym.Wrapper):
             # vehicles_state (front + rear): type, pos_x, pos_y, speed, acceleration, heading - 2*6
             # ego_lane_statistics: num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 6
             self.self_obs_size = 8 + 3 + 10 + 2 * 6 + 6
-            # nodes_pos: pos_x, pos_y - 4*2
+            # road_structure: four nodes' positions - 4*2
             # all_CAVs_state: pos_x, pos_y, speed, acceleration, heading - max_num_CAVs*5
             # all_lane_statistics: num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 4*6
             self.shared_obs_size = 4 * 2 + self.max_num_CAVs * 5 + 4 * 6
         elif self.strategy == 'iMARL':
-            # next_node_pos: pos_x, pos_y - 2
-            # dist_nest_node: dist - 1
-            # vehicles_state (front + ego + rear): type, (pos_x, pos_y, speed, acceleration, heading) * (hist_length + 1) - 3*(1 + 5 * (hist_length + 1))
-            # ego_lane_statistics: num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 6
-            self.self_obs_size = 2 + 1 + 3 * (1 + 5 * (self.hist_length + 1)) + 6
-            # lane_static+statistics - start_x, start_y, end_x, end_y, num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 4*10
-            # all_vehs_distribution: each lane-veh_info: type, pos_x, pos_y, speed, acceleration, heading - 4 * (max_num_vehs_lane) *6
-            self.shared_obs_size = 4 * 4 + 4 * (self.lane_max_num_vehs) * 6
+            # road_structure: four nodes' positions - 4*2
+            # next_node_pos: pos_x, pos_y , dist_next_node - 3
+            # self_stats: pos_x, pos_y, speed, acceleration, heading, lane_one_hot, last_actor_action - 12 + 2
+            # self_hist: pos_x, pos_y, speed, acceleration, heading - 1+5*self.hist_length
+            # vehicles_2_state (front + rear): type, pos_x, pos_y, speed, acceleration, heading - 2*(1+5*self.hist_length)
+            # vehicles_4_state (2 front + 2 rear): type, pos_x, pos_y, speed, acceleration, heading - 4*(1+5*self.hist_length)
+            # vehicles_6_state (3 front + 3 rear): type, pos_x, pos_y, speed, acceleration, heading - 6*(1+5*self.hist_length)
+            # ego_lane_statistics: start, end, num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 10
+            # next_lane_statistics: start, end, num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 10
+            self.self_obs_size = (8 + 3 + 12 + (1+5*self.hist_length) + (2*(1+5*self.hist_length)) + (4*(1+5*self.hist_length))
+                                  + (6 * (1 + 5 * self.hist_length)) + 2 * 10)
+            # road_structure: four nodes' positions - 4*2
+            # all_HDVs_state: pos_x, pos_y, speed, acceleration, heading - max_num_HDVs*9
+            # all_CAVs_state: pos_x, pos_y, speed, acceleration, heading - max_num_CAVs*5
+            # all_lane_statistics - start, end, num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 4*10
+            # all_lane_distribution: each lane-veh_info: type, pos_x, pos_y, speed, acceleration, heading - 4 * (max_num_vehs_lane) *6
+            self.shared_obs_size = 8 + self.max_num_HDVs*9 + self.max_num_CAVs*5 + 4*10 + 4 * self.lane_max_num_vehs * 6
         self.vehicles_hist = {}
-        self.lanes_hist = {}
+        # self.lanes_hist = {}
         if self.use_hist_info:
             self.obs_size = self.self_obs_size
             for i in range(self.hist_length):
-                self.vehicles_hist[f'hist_{i+1}'] = {veh_id: np.zeros(7) for veh_id in self.veh_ids}
+                self.vehicles_hist[f'hist_{i+1}'] = {veh_id: [0.0]*5 for veh_id in self.veh_ids}
                 # self.lanes_hist[f'hist_{i+1}'] = {lane_id: np.zeros(26) for lane_id in self.calc_features_lane_ids}
         else:
             self.obs_size = self.self_obs_size
         self.surround_vehicle = {ego_id: {} for ego_id in self.ego_ids}
-        self.surround_vehicle_expand = {ego_id: {} for ego_id in self.ego_ids}
+        self.surround_vehicle_expand_4 = {ego_id: {} for ego_id in self.ego_ids}
+        self.surround_vehicle_expand_6 = {ego_id: {} for ego_id in self.ego_ids}
         self.required_surroundings = ['front', 'back']
         self.TTC_assessment = {ego_id: {key: 100 for key in self.required_surroundings} for ego_id in self.ego_ids}
         self.change_action_mark = {ego_id: [] for ego_id in self.ego_ids}
@@ -191,7 +201,8 @@ class VehEnvWrapper(gym.Wrapper):
     # ##################
     def append_surrounding(self, state):
         surrounding_vehicles = {}
-        sorrounding_vehicles_expand = {}
+        sorrounding_vehicles_expand_4 = {}
+        sorrounding_vehicles_expand_6 = {}
         """
                     ^ y (+)
                     |
@@ -211,7 +222,8 @@ class VehEnvWrapper(gym.Wrapper):
                 else:
                     import libsumo as traci
                 surrounding_vehicle = {}
-                sorrounding_vehicle_expand = {}
+                sorrounding_vehicle_expand_4 = {}
+                surrounding_vehicle_expand_6 = {}
 
                 # 在当前车道上的前车
                 front_vehicle = traci.vehicle.getLeader(vehicle_id)
@@ -238,7 +250,8 @@ class VehEnvWrapper(gym.Wrapper):
                         else:
                             veh_type = 1
                         surrounding_vehicle['front'] = (front_vehicle[0], veh_type, long_dist, 0, relative_speed, veh_accel, veh_heading)
-                        sorrounding_vehicle_expand['front'] = (front_vehicle[0], veh_type, long_dist, 0, relative_speed, veh_accel, veh_heading)
+                        sorrounding_vehicle_expand_4['front'] = (front_vehicle[0], veh_type, long_dist, 0, relative_speed, veh_accel, veh_heading)
+                        surrounding_vehicle_expand_6['front'] = (front_vehicle[0], veh_type, long_dist, 0, relative_speed, veh_accel, veh_heading)
                         front_vehicle_expand = traci.vehicle.getLeader(front_vehicle[0])
                         if front_vehicle_expand not in [None, ()] and front_vehicle_expand[0] != '':
                             relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(front_vehicle_expand[0])
@@ -256,7 +269,9 @@ class VehEnvWrapper(gym.Wrapper):
 
                             else:
                                 raise ValueError('Unknown vehicle type')
-                            sorrounding_vehicle_expand['front_expand_0'] = (front_vehicle_expand[0], expand_veh_type, long_dist,
+                            sorrounding_vehicle_expand_4['front_expand_0'] = (front_vehicle_expand[0], expand_veh_type, long_dist,
+                                                                            0, relative_speed, expand_veh_accel, expand_veh_heading)
+                            surrounding_vehicle_expand_6['front_expand_0'] = (front_vehicle_expand[0], expand_veh_type, long_dist,
                                                                             0, relative_speed, expand_veh_accel, expand_veh_heading)
                             front_vehicle_expand_exp = traci.vehicle.getLeader(front_vehicle_expand[0])
                             if front_vehicle_expand_exp not in [None, ()] and front_vehicle_expand_exp[0] != '':
@@ -273,7 +288,7 @@ class VehEnvWrapper(gym.Wrapper):
                                     long_dist = long_dist + front_vehicle_expand_exp[1] + 1.0
                                 else:
                                     raise ValueError('Unknown vehicle type')
-                                sorrounding_vehicle_expand['front_expand_1'] = (front_vehicle_expand_exp[0], expand_veh_type, long_dist,
+                                surrounding_vehicle_expand_6['front_expand_1'] = (front_vehicle_expand_exp[0], expand_veh_type, long_dist,
                                                                                   0, relative_speed, expand_veh_accel, expand_veh_heading)
 
                 # 在当前车道上的后车
@@ -304,7 +319,8 @@ class VehEnvWrapper(gym.Wrapper):
                         else:
                             raise ValueError('Unknown vehicle type')
                         surrounding_vehicle['back'] = (back_vehicle[0], veh_type, -(long_dist), 0, relative_speed, veh_accel, veh_heading)
-                        sorrounding_vehicle_expand['back'] = (back_vehicle[0], veh_type, -(long_dist), 0, relative_speed, veh_accel, veh_heading)
+                        sorrounding_vehicle_expand_4['back'] = (back_vehicle[0], veh_type, -(long_dist), 0, relative_speed, veh_accel, veh_heading)
+                        surrounding_vehicle_expand_6['back'] = (back_vehicle[0], veh_type, -(long_dist), 0, relative_speed, veh_accel, veh_heading)
                         back_vehicle_expand = traci.vehicle.getFollower(back_vehicle[0])
                         if back_vehicle_expand not in [None, ()] and back_vehicle_expand[0] != '':
                             expand_veh_accel = traci.vehicle.getAcceleration(back_vehicle_expand[0])
@@ -318,7 +334,9 @@ class VehEnvWrapper(gym.Wrapper):
                                 long_dist = long_dist + back_vehicle_expand[1] + 1.0
                             else:
                                 raise ValueError('Unknown vehicle type')
-                            sorrounding_vehicle_expand['back_expand_0'] = (back_vehicle_expand[0], expand_veh_type, -(long_dist),
+                            sorrounding_vehicle_expand_4['back_expand_0'] = (back_vehicle_expand[0], expand_veh_type, -(long_dist),
+                                                                        0, relative_speed, expand_veh_accel, expand_veh_heading)
+                            surrounding_vehicle_expand_6['back_expand_0'] = (back_vehicle_expand[0], expand_veh_type, -(long_dist),
                                                                         0, relative_speed, expand_veh_accel, expand_veh_heading)
                             back_vehicle_expand_exp = traci.vehicle.getFollower(back_vehicle_expand[0])
                             if back_vehicle_expand_exp not in [None, ()] and back_vehicle_expand_exp[0] != '':
@@ -333,18 +351,21 @@ class VehEnvWrapper(gym.Wrapper):
                                     long_dist = long_dist + back_vehicle_expand_exp[1] + 1.0
                                 else:
                                     raise ValueError('Unknown vehicle type')
-                                sorrounding_vehicle_expand['back_expand_1'] = (back_vehicle_expand_exp[0], expand_veh_type, -(long_dist),
+                                surrounding_vehicle_expand_6['back_expand_1'] = (back_vehicle_expand_exp[0], expand_veh_type, -(long_dist),
                                                                           0, relative_speed, expand_veh_accel, expand_veh_heading)
 
                 surrounding_vehicles[vehicle_id] = surrounding_vehicle
-                sorrounding_vehicles_expand[vehicle_id] = sorrounding_vehicle_expand
+                sorrounding_vehicles_expand_4[vehicle_id] = sorrounding_vehicle_expand_4
+                sorrounding_vehicles_expand_6[vehicle_id] = surrounding_vehicle_expand_6
 
                 pass
         for vehicle_id in surrounding_vehicles.keys():
             state['vehicle'][vehicle_id]['surround'] = surrounding_vehicles[vehicle_id]
-            state['vehicle'][vehicle_id]['surround_expand'] = sorrounding_vehicles_expand[vehicle_id]
+            state['vehicle'][vehicle_id]['surround_expand_4'] = sorrounding_vehicles_expand_4[vehicle_id]
+            state['vehicle'][vehicle_id]['surround_expand_6'] = sorrounding_vehicles_expand_6[vehicle_id]
             self.surround_vehicle[vehicle_id] = surrounding_vehicles[vehicle_id]
-            self.surround_vehicle_expand[vehicle_id] = sorrounding_vehicles_expand[vehicle_id]
+            self.surround_vehicle_expand_4[vehicle_id] = sorrounding_vehicles_expand_4[vehicle_id]
+            self.surround_vehicle_expand_6[vehicle_id] = sorrounding_vehicles_expand_6[vehicle_id]
 
         return state
 
@@ -695,7 +716,7 @@ class VehEnvWrapper(gym.Wrapper):
                 ego_statistics=ego_statistics,
                 unique_edges=self.edge_ids,
                 edge_lane_num=self.edge_lane_num,
-                bottle_neck_positions=self.bottle_neck_positions,
+                node_positions=self.node_positions,
                 ego_ids=self.ego_ids,
             )
 
@@ -788,10 +809,10 @@ class VehEnvWrapper(gym.Wrapper):
                 # inidividual_rew_ego[veh_id] += 1 * individual_speed_r
 
                 # CAV车辆的target速度越靠近最大速度，reward越高 - [0, 5]
-                individual_speed_r_simple = (-abs(speed - max_speed) / max_speed * 5 + 5) * 2
+                individual_speed_r_simple = (-abs(speed - max_speed) / max_speed * 5 + 5) * 1
                 inidividual_rew_ego[veh_id] += individual_speed_r_simple
                 # CAV车辆的加速度绝对值越小，reward越高 - [0, 6]
-                individual_acceleration_r = (-abs(acceleration) + 6) * 1
+                individual_acceleration_r = (-abs(acceleration) + 6) * 0.5
                 inidividual_rew_ego[veh_id] += individual_acceleration_r
 
                 # # CAV车辆的等待时间越短，reward越高 - (-infty,0]
@@ -811,16 +832,17 @@ class VehEnvWrapper(gym.Wrapper):
                         # CAV车辆的警告距离越远，reward越高 - [0, 5]
                         individual_warn_r += -(WARN_GAP_THRESHOLD - dis) / (
                                 WARN_GAP_THRESHOLD - GAP_THRESHOLD) * 10  # [-10, 0]
-                    inidividual_rew_ego[veh_id] += individual_warn_r * 0.1
+                    inidividual_rew_ego[veh_id] += individual_warn_r * 0.05
 
                 if veh_id in self.coll_ego_ids.keys():
                     individual_coll_r = 0
                     for dis in self.coll_ego_ids[veh_id]:
                         # CAV车辆的碰撞距离越远，reward越高 - [0, 5]
                         individual_coll_r += -(GAP_THRESHOLD - dis) / GAP_THRESHOLD * 20 - 10  # [-30, -10]
-                    inidividual_rew_ego[veh_id] += individual_coll_r * 0.1
+                    inidividual_rew_ego[veh_id] += individual_coll_r * 0.05
 
                 time_penalty_ego[veh_id] = 0
+                # time_penalty_ego[veh_id] = (1 / (1 + np.exp(10 - speed)) - 0.5) * 5
 
         # 计算全局reward
         all_ego_vehicle_speed = np.mean(all_ego_vehicle_speed)  # CAV车辆的平均速度 - 使用target speed
@@ -848,7 +870,7 @@ class VehEnvWrapper(gym.Wrapper):
         # global_all_waiting_time_r = -all_vehicle_waiting_time   # (-infty,0]
 
 
-        time_penalty = -1
+        time_penalty = 0
 
         # TODO： lane_statistics  在E2的等待时间
         # TODO: 完成时间越短，reward越高 - [0, 5]
@@ -864,7 +886,7 @@ class VehEnvWrapper(gym.Wrapper):
                         + time_penalty_ego[key] \
                         + self.CAV_penetration * global_ego_speed_r \
                         # + global_ego_mean_speed_r \
-                        + self.CAV_penetration * global_ego_acceleration_r \
+                        # + self.CAV_penetration * global_ego_acceleration_r \
                         # + global_ego_waiting_time_r \
                         # + global_ego_accumulated_waiting_time_r \
                         # + global_all_speed_r \

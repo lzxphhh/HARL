@@ -14,9 +14,9 @@ num_CAVs: 16  # num_CAVs/penetration_CAV should be an integer multiple of 10, ex
 num_HDVs: 24
 lane_max_num_vehs: 15
 penetration_CAV: 0.4 # only 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1 are valid
-strategy: "base"  # "base" or "iMARL"
-use_hist_info: False
-hist_length: 0
+strategy: "iMARL"  # "base" or "iMARL"
+use_hist_info: True
+hist_length: 5
 warmup_steps: 0
 edge_ids: [ 'E0', 'E1', 'E2', 'E3',]
 edge_lane_num: { 'E0': 1,
@@ -47,4 +47,4 @@ cautious: 0.2
 normal: 0.6
 
 save_collision: 0.0
-save_episode_mean_speed: 7.97
+save_episode_mean_speed: 11

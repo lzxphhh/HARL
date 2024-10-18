@@ -8,6 +8,7 @@ from harl.models.base.hierarchical_state_rep import Hierarchical_state_rep
 # from harl.models.base.prediction_rep import Prediction_rep
 from harl.models.base.cross_aware_rep import Cross_aware_rep
 from harl.models.base.TIE_rep import TIE_rep
+from harl.models.base.MARL_CACC import CACC_rep
 from harl.models.base.rnn import RNNLayer
 from harl.models.base.act import ACTLayer
 from harl.utils.envs_tools import get_shape_from_obs_space
@@ -50,6 +51,7 @@ class StochasticPolicy(nn.Module):
         self.tie_rep = TIE_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
         # self.prediction = Prediction_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
         self.cross_aware = Cross_aware_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
+        self.MARL_CACC = CACC_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
         self.num_CAVs = args['num_CAVs']
         self.num_HDVs = args['num_HDVs']
         self.CAV_ids = [f'CAV_{i}' for i in range(self.num_CAVs)]
@@ -130,7 +132,7 @@ class StochasticPolicy(nn.Module):
         elif self.strategy == 'DIACC':
             actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
         elif self.strategy == 'iMARL':
-            actor_features = self.base(obs)
+            actor_features, reconstruct_info = self.MARL_CACC(obs, batch_size=obs.size(0))
 
         # end = time.time()
         # print(f'forward time: {end - start} second')
@@ -142,11 +144,6 @@ class StochasticPolicy(nn.Module):
         actions, action_log_probs = self.act(
             actor_features, available_actions, deterministic
         )
-        info_current = self.reconstruct_info(obs)
-        ego_speed = info_current[2][:, :, 3:4] * 20
-        ego_speed = ego_speed.squeeze(-1)
-        ego_acceleration = abs(info_current[2][:, :, 4:5]) * 6
-        ego_acceleration = ego_acceleration.squeeze(-1)
         # action_loss
         action_loss_output = torch.zeros(env_num, 1, device=self.tpdv['device'])
         # last_actor_action = reconstruct_info[7]
@@ -201,7 +198,7 @@ class StochasticPolicy(nn.Module):
         elif self.strategy == 'DIACC':
             actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
         elif self.strategy == 'iMARL':
-            actor_features = self.base(obs)
+            actor_features, reconstruct_info = self.MARL_CACC(obs, batch_size=obs.size(0))
 
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)

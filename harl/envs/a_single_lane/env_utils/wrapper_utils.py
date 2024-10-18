@@ -129,13 +129,14 @@ def analyze_traffic(state, lane_ids):
         if vehicle['vehicle_type'] == 'ego':
             # TODO: when will the state['leader'] be not None?
             surroundings = vehicle['surround']
-            surroundings_expand = vehicle['surround_expand']
+            surroundings_expand_4 = vehicle['surround_expand_4']
+            surroundings_expand_6 = vehicle['surround_expand_6']
 
             ego_statistics[vehicle_id] = [position, speed, acceleration,
-                                          # speed, position,
                                           heading, road_id, lane_index,
                                           surroundings,
-                                          surroundings_expand
+                                          surroundings_expand_4,
+                                          surroundings_expand_6
                                           ]
         # HDV车需要的信息
         else:
@@ -516,14 +517,8 @@ def compute_base_ego_vehicle_features(
         lane_statistics (Dict[str, List[float]]): 路网的信息
         unique_edges (List[str]): 所有考虑的 edge
         edge_lane_num (Dict[str, int]): 每一个 edge 对应的车道
-        bottle_neck_positions (Tuple[float]): bottleneck 的坐标
+        node_positions (Tuple[float]): 每个道路节点的坐标
     output:
-        surround_vehs_stats: 12 * 3-relative x,y,v
-        ego_lane_stats: 6--vehicle count, lane density, lane length, speed-mean, waiting time-mean, lane CAV penetration
-        left_lane_stats: 6--vehicle count, lane density, lane length, speed-mean, waiting time-mean, lane CAV penetration
-        right_lane_stats: 6--vehicle count, lane density, lane length, speed-mean, waiting time-mean, lane CAV penetration
-        bottleneck_position & distance: 1 * 2
-        self_stats: 1 * 13
     """
     # ############################## 所有HDV的信息 ############################## 13
     hdv_stats = {}
@@ -564,7 +559,7 @@ def compute_base_ego_vehicle_features(
     surround_vehs_stats = {key:[] for key in ego_ids}
     for ego_id, ego_info in ego_statistics.items():
         # ############################## 自己车的信息 ############################## 13
-        position, speed, acceleration, heading, road_id, lane_index, surroundings, surroundings_expand = ego_info
+        position, speed, acceleration, heading, road_id, lane_index, surroundings, surroundings_expand_4, surroundings_expand_6 = ego_info
         # 速度归一化  - 1
         normalized_speed = speed / state_divisors[2]
         # 加速度归一化  - 1
@@ -641,7 +636,7 @@ def compute_base_ego_vehicle_features(
         all_lane_stats[lane_id] = lane_info[:4] + lane_info[6:7] + lane_info[16:17]
     for ego_id, ego_info in ego_statistics.items():
         # ############################## 自己车的信息 ############################## 13
-        position, speed, acceleration, heading, road_id, lane_index, surroundings, surroundings_expand = ego_info
+        position, speed, acceleration, heading, road_id, lane_index, surroundings, surroundings_expand_4, surroundings_expand_6 = ego_info
         ego_lane = f'{road_id}_{lane_index}'
         ego_lane_stats[ego_id] = all_lane_stats[ego_lane]
 
@@ -700,7 +695,7 @@ def compute_hierarchical_ego_vehicle_features(
         lane_statistics: Dict[str, List[float]],
         unique_edges: List[str],
         edge_lane_num: Dict[str, int],
-        bottle_neck_positions: Tuple[float],
+        node_positions: Dict[str, List[int]],
         ego_ids: List[str]
 ) -> Dict[str, List[float]]:
     """计算每一个 ego vehicle 的特征
@@ -710,41 +705,9 @@ def compute_hierarchical_ego_vehicle_features(
         lane_statistics (Dict[str, List[float]]): 路网的信息
         unique_edges (List[str]): 所有考虑的 edge
         edge_lane_num (Dict[str, int]): 每一个 edge 对应的车道
-        bottle_neck_positions (Tuple[float]): bottleneck 的坐标
+        node_positions (Tuple[float]): 每个道路节点的坐标
     output:
-        surround_hdv_stats: 12 * 3-relative x,y,v
-        surround_cav_stats: 12 * 3-relative x,y,v
-        ego_lane_stats: 4--vehicle count, lane density, speed-mean, waiting time-mean
-        left_lane_stats: 4--vehicle count, lane density, speed-mean, waiting time-mean
-        right_lane_stats: 4--vehicle count, lane density, speed-mean, waiting time-mean
-        bottleneck_position & distance: 1 * 2 + 1
-        self_stats: 1 * 13
     """
-    # 建立全局车辆图关系
-    vehicle_order = {'CAV_0': 0, 'CAV_1': 1, 'CAV_2': 2, 'CAV_3': 3, 'CAV_4': 4, 'CAV_5': 5, 'CAV_6': 6, 'CAV_7': 7,
-                     'CAV_8': 8,
-                     'CAV_9': 9, 'CAV_10': 10, 'CAV_11': 11, 'CAV_12': 12, 'CAV_13': 13, 'CAV_14': 14, 'CAV_15': 15,
-                     'HDV_0': 16, 'HDV_1': 17, 'HDV_2': 18, 'HDV_3': 19, 'HDV_4': 20, 'HDV_5': 21, 'HDV_6': 22,
-                     'HDV_7': 23,
-                     'HDV_8': 24, 'HDV_9': 25, 'HDV_10': 26, 'HDV_11': 27, 'HDV_12': 28, 'HDV_13': 29, 'HDV_14': 30,
-                     'HDV_15': 31,
-                     'HDV_16': 32, 'HDV_17': 33, 'HDV_18': 34, 'HDV_19': 35, 'HDV_20': 36, 'HDV_21': 37, 'HDV_22': 38,
-                     'HDV_23': 39}
-
-    vehicle_relation_graph = np.zeros((self.max_num_CAVs + self.max_num_HDVs, self.max_num_CAVs + self.max_num_HDVs))
-    # ############################## 所有HDV的信息 ############################## 13
-    hdv_stats = {}
-    hdv_hist = {}
-    surround_modes = {
-        'left_followers': 0b000,  # Left and followers
-        'right_followers': 0b001,  # Left and leaders
-        'left_leaders': 0b010,  # Right and followers
-        'right_leaders': 0b011  # Right and leaders
-    }
-    # 定义对应的除法系数
-    state_divisors = np.array([700, 3.2, 15, 360, 4, 4, 15])
-
-    # A function to flatten a dictionary structure into 1D array
     def flatten_to_1d(data_dict):
         flat_list = []
         for key, item in data_dict.items():
@@ -764,272 +727,278 @@ def compute_hierarchical_ego_vehicle_features(
             else:
                 flat_list.append(item)  # 非可迭代对象直接添加
         return flat_list
-
+    # ############################## 所有HDV的信息 ############################## 13
+    hdv_stats = {}
+    hdv_hist = {}
     for hdv_id, hdv_info in hdv_statistics.items():
-        speed, position, heading, road_id, lane_index = hdv_info
+        position, speed, acceleration, heading, road_id, lane_index = hdv_info
         # 速度归一化  - 1
-        normalized_speed = speed / 15.0
+        normalized_speed = speed / state_divisors[2]
+        # 加速度归一化  - 1
+        normalized_acceleration = acceleration / state_divisors[3]
         # 位置归一化  - 2
         position_x, position_y = position
-        normalized_position_x = position_x / 700
-        normalized_position_y = position_y / 3.2
+        normalized_position_x = position_x / state_divisors[0]
+        normalized_position_y = position_y / state_divisors[1]
         # 转向归一化 - 1
-        normalized_heading = heading / 360
+        normalized_heading = heading / state_divisors[4]
         # One-hot encode road_id - 5
         road_id_one_hot = one_hot_encode(road_id, unique_edges)
         # One-hot encode lane_index - 4
-        lane_index_one_hot = one_hot_encode(lane_index, list(range(edge_lane_num.get(road_id, 0))))
-        # 如果车道数不足4个, 补0 对齐到最多数量的lane num
-        if len(lane_index_one_hot) < 4:
-            lane_index_one_hot += [0] * (4 - len(lane_index_one_hot))
-        hdv_stats[hdv_id] = [normalized_position_x, normalized_position_y, normalized_speed, normalized_heading, -1, -1, -1]
+        # lane_index_one_hot = one_hot_encode(lane_index, list(range(edge_lane_num.get(road_id, 0))))
+        # # 如果车道数不足4个, 补0 对齐到最多数量的lane num
+        # if len(lane_index_one_hot) < 4:
+        #     lane_index_one_hot += [0] * (4 - len(lane_index_one_hot))
+        hdv_stats[hdv_id] = [normalized_position_x, normalized_position_y, normalized_speed, normalized_acceleration,
+                             normalized_heading] + road_id_one_hot
         hdv_hist[hdv_id] = []
         if self.use_hist_info:
             for i in range(self.hist_length - 1):
-                self.vehicles_hist[f'hist_{self.hist_length - i}'][hdv_id] = copy.deepcopy(self.vehicles_hist[f'hist_{self.hist_length - i - 1}'][hdv_id])
-                hist_state = copy.deepcopy(self.vehicles_hist[f'hist_{self.hist_length - i}'][hdv_id])
-                hist_state /= state_divisors
+                self.vehicles_hist[f'hist_{self.hist_length - i}'][hdv_id] = copy.deepcopy(
+                    self.vehicles_hist[f'hist_{self.hist_length - i - 1}'][hdv_id])
+                hist_state = copy.deepcopy(self.vehicles_hist[f'hist_{self.hist_length - i}'][hdv_id][:5])
+                hist_state /= state_divisors[:5]
                 hdv_hist[hdv_id].extend(hist_state)
-            self.vehicles_hist['hist_1'][hdv_id] = [position_x, position_y, speed, heading, -1, -1, -1]
-            hist_state = copy.deepcopy(self.vehicles_hist['hist_1'][hdv_id])
-            hist_state /= state_divisors
+            self.vehicles_hist['hist_1'][hdv_id] = [position_x, position_y, speed, acceleration, heading]
+            hist_state = copy.deepcopy(self.vehicles_hist['hist_1'][hdv_id][:5])
+            hist_state /= state_divisors[:5]
             hdv_hist[hdv_id].extend(hist_state)
-        # hdv_stats[hdv_id] = [normalized_speed, normalized_position_x, normalized_position_y,
-        #                      normalized_heading] + road_id_one_hot + lane_index_one_hot
-        if self.use_gui:
-            import traci as traci
-        else:
-            import libsumo as traci
-        for key, mode in surround_modes.items():
-            neighbors = traci.vehicle.getNeighbors(hdv_id, mode)
-            if neighbors and neighbors[0][0] in vehicle_order:
-                vehicle_relation_graph[vehicle_order[hdv_id], vehicle_order[neighbors[0][0]]] = 1
-                vehicle_relation_graph[vehicle_order[neighbors[0][0]], vehicle_order[hdv_id]] = 1
-        front_vehicle = traci.vehicle.getLeader(hdv_id)
-        if front_vehicle and front_vehicle[0] in vehicle_order:
-            vehicle_relation_graph[vehicle_order[hdv_id], vehicle_order[front_vehicle[0]]] = 1
-        following_vehicle = traci.vehicle.getFollower(hdv_id)
-        if following_vehicle and following_vehicle[0] in vehicle_order:
-            vehicle_relation_graph[vehicle_order[following_vehicle[0]], vehicle_order[hdv_id]] = 1
-
-    # convert to 2D array (24 * 3)  - 24 is max number of HDVs
+    # convert to 2D array (12 * 13)  - 12 is max number of HDVs
+        # convert to 2D array (24 * 3)  - 24 is max number of HDVs
     for i in range(self.max_num_HDVs):
-        if 'HDV_'+str(i) not in hdv_stats:
-            hdv_stats['HDV_'+str(i)] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-            hdv_hist['HDV_'+str(i)] = np.zeros(7*self.hist_length, dtype=np.float32)
-    hdv_stats = dict(sorted(hdv_stats.items(), key=lambda x: int(x[0].split('_')[1])))
-    hdv_hist = dict(sorted(hdv_hist.items(), key=lambda x: int(x[0].split('_')[1])))
+        if 'HDV_' + str(i) not in hdv_stats:
+            hdv_stats['HDV_' + str(i)] = [0.0] * 9
+            hdv_hist['HDV_' + str(i)] = [0.0] * (5 * self.hist_length)
+    # hdv_stats = dict(sorted(hdv_stats.items(), key=lambda x: int(x[0].split('_')[1])))
+    # hdv_hist = dict(sorted(hdv_hist.items(), key=lambda x: int(x[0].split('_')[1])))
     hdv_stats = np.array(list(hdv_stats.values()))
     hdv_hist = np.array(list(hdv_hist.values()))
-    if 0 < hdv_stats.shape[0] <= self.max_num_HDVs:
-        # add 0 to make sure the shape is (max_num_HDVs, 13)
-        hdv_stats = np.vstack([hdv_stats, np.zeros((self.max_num_HDVs - hdv_stats.shape[0], 7))])
-    elif hdv_stats.shape[0] == 0:
-        hdv_stats = np.zeros((self.max_num_HDVs, 7))
-    if 0 < hdv_hist.shape[0] <= self.max_num_HDVs:
-        # add 0 to make sure the shape is (max_num_HDVs, 7*self.hist_length)
-        hdv_hist = np.vstack([hdv_hist, np.zeros((self.max_num_HDVs - hdv_hist.shape[0], 7*self.hist_length))])
-    elif hdv_hist.shape[0] == 0:
-        hdv_hist = np.zeros((self.max_num_HDVs, 7*self.hist_length))
+    # hdv_stats = np.array(list(hdv_stats.values()))
+    # if 0 < hdv_stats.shape[0] <= self.max_num_HDVs:
+    #     # add 0 to make sure the shape is (12, 13)
+    #     hdv_stats = np.vstack([hdv_stats, np.zeros((self.max_num_HDVs - hdv_stats.shape[0], 9))])
+    # elif hdv_stats.shape[0] == 0:
+    #     hdv_stats = np.zeros((self.max_num_HDVs, 9))
     # ############################## 所有CAV的信息 ############################## 13
     cav_stats = {}
     cav_hist = {}
     ego_stats = {}
-    surround_vehs_stats = {key:[] for key in ego_ids}
-    ego_cav_motion = {key:[] for key in ego_ids}
-    ego_hdv_motion = {key:[] for key in ego_ids}
-    ego_hist_motion = {key:[] for key in ego_ids}
-
-    surround_relation_graph = {key: np.ones((1 + 9, 1 + 9)) for key in ego_ids}
-    surround_relation_graph_simple = {key: np.ones((1 + 6, 1 + 6)) for key in ego_ids}
-    surround_order = {'ego': 0, 'front': 1, 'front_expand': 2, 'back': 3,
-                      'left_followers': 4, 'right_followers': 5,
-                      'left_leaders': 6, 'left_leaders_expand': 7,
-                      'right_leaders': 8, 'right_leaders_expand': 9}
-    simple_surround_order = {'front': 1, 'back': 2, 'left_followers': 3,
-                             'right_followers': 4, 'left_leaders': 5, 'right_leaders': 6}
-    surround_stats = {key: {surround_key: np.zeros(1+7*5) for surround_key in simple_surround_order.keys()} for key in ego_ids}
-    expand_surround_stats = {key: {surround_key: np.zeros(4*5) for surround_key in surround_order.keys()} for key in ego_ids}
-    surround_IDs = {key: {surround_key: 0 for surround_key in surround_order.keys()} for key in ego_ids}
+    global_cav = {}
+    next_node = {}
+    ego_lane_stats = {}
+    next_lane_stats = {}
+    surround_2_vehs_stats = {key: [] for key in ego_ids}
+    surround_4_vehs_stats = {key: [] for key in ego_ids}
+    surround_6_vehs_stats = {key: [] for key in ego_ids}
+    ego_hist_motion = {key: [] for key in ego_ids}
+    surround_2_key = {'front', 'back'}
+    surround_4_key = {'front', 'front_expand_0', 'back', 'back_expand_0'}
+    surround_6_key = {'front', 'front_expand_0', 'front_expand_1', 'back', 'back_expand_0', 'back_expand_1'}
+    surround_2_stats = {key: {surround_key: [0.0] * (1 + self.hist_length * 5) for surround_key in surround_2_key} for key
+                        in ego_ids}
+    surround_4_stats = {key: {surround_key: [0.0] * (1 + self.hist_length * 5) for surround_key in surround_4_key} for key
+                        in ego_ids}
+    surround_6_stats = {key: {surround_key: [0.0] * (1 + self.hist_length * 5) for surround_key in surround_6_key} for key
+                        in ego_ids}
     for ego_id, ego_info in ego_statistics.items():
         # ############################## 自己车的信息 ############################## 13
-        position, speed, heading, road_id, lane_index, surroundings, expand_surroundings = ego_info
+        position, speed, acceleration, heading, road_id, lane_index, surroundings_2, surroundings_4, surroundings_6 = ego_info
         # 速度归一化  - 1
-        normalized_speed = speed / 15.0
+        normalized_speed = speed / state_divisors[2]
+        # 加速度归一化  - 1
+        normalized_acceleration = acceleration / state_divisors[3]
         # 位置归一化  - 2
         position_x, position_y = position
-        normalized_position_x = position_x / 700
-        normalized_position_y = position_y / 3.2
+        normalized_position_x = position_x / state_divisors[0]
+        normalized_position_y = position_y / state_divisors[1]
         # 转向归一化 - 1
-        normalized_heading = heading / 360
+        if heading < 0:
+            heading += 360
+        elif heading > 360:
+            heading -= 360
+        normalized_heading = heading / state_divisors[4]
         # One-hot encode road_id - 5
         road_id_one_hot = one_hot_encode(road_id, unique_edges)
-        # One-hot encode lane_index - 4
-        lane_index_one_hot = one_hot_encode(lane_index, list(range(edge_lane_num.get(road_id, 0))))
-        # 如果车道数不足4个, 补0 对齐到最多数量的lane num
-        if len(lane_index_one_hot) < 4:
-            lane_index_one_hot += [0] * (4 - len(lane_index_one_hot))
         # ############################## 自己车的运动信息 ############################## 20
         ego_hist_4 = self.vehicles_hist['hist_4'][ego_id]
         ego_hist_3 = self.vehicles_hist['hist_3'][ego_id]
         ego_hist_2 = self.vehicles_hist['hist_2'][ego_id]
         ego_hist_1 = self.vehicles_hist['hist_1'][ego_id]
 
-        relative_hist_4 = [(ego_hist_4[0] - position_x), (ego_hist_4[1] - position_y), (speed - ego_hist_4[2]), (ego_hist_4[3]-heading), ego_hist_4[4], ego_hist_4[5], ego_hist_4[6]] \
-            if ego_hist_4[0] != 0 else [0, 0, 0, 0, 0, 0, 0]
-        relative_hist_4 = [rm / sd for rm, sd in zip(relative_hist_4, state_divisors)]
-        relative_hist_3 = [(ego_hist_3[0] - position_x), (ego_hist_3[1] - position_y), (speed - ego_hist_3[2]), (ego_hist_3[3]-heading), ego_hist_3[4], ego_hist_3[5], ego_hist_3[6]] \
-            if ego_hist_3[0] != 0 else [0, 0, 0, 0, 0, 0, 0]
-        relative_hist_3 = [rm / sd for rm, sd in zip(relative_hist_3, state_divisors)]
-        relative_hist_2 = [(ego_hist_2[0] - position_x), (ego_hist_2[1] - position_y), (speed - ego_hist_2[2]), (ego_hist_2[3]-heading), ego_hist_2[4], ego_hist_2[5], ego_hist_2[6]] \
-            if ego_hist_2[0] != 0 else [0, 0, 0, 0, 0, 0, 0]
-        relative_hist_2 = [rm / sd for rm, sd in zip(relative_hist_2, state_divisors)]
-        relative_hist_1 = [(ego_hist_1[0] - position_x), (ego_hist_1[1] - position_y), (speed - ego_hist_1[2]), (ego_hist_1[3]-heading), ego_hist_1[4], ego_hist_1[5], ego_hist_1[6]] \
-                if ego_hist_1[0] != 0 else [0, 0, 0, 0, 0, 0, 0]
-        relative_hist_1 = [rm / sd for rm, sd in zip(relative_hist_1, state_divisors)]
-        relative_current = [0, 0, 0, 0]
-        last_action = copy.deepcopy(self.lowercontroller_action[ego_id][-1]) if self.lowercontroller_action[ego_id] else [0, 0, 0]
-        last_action = [last_action[0], last_action[1], last_action[2]]
-        relative_motion = relative_current + last_action
-        relative_motion = [rm / sd for rm, sd in zip(relative_motion, state_divisors)]
-        ego_hist_motion[ego_id] = relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + relative_motion
-        cav_last_action = copy.deepcopy(self.lowercontroller_action[ego_id][-1]) if self.lowercontroller_action[
-            ego_id] else [0, 0, 0]
-        cav_last_action = [cav_last_action[0] / 4, cav_last_action[1] / 4, cav_last_action[2] / 15]
-        cav_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed,
-                             normalized_heading] + cav_last_action
-        ego_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed,
-                             normalized_heading] + road_id_one_hot + lane_index_one_hot
+        relative_hist_4 = [(ego_hist_4[0] - position_x), (ego_hist_4[1] - position_y), (speed - ego_hist_4[2]),
+                           (acceleration - ego_hist_4[3]), (ego_hist_4[4] - heading)] \
+            if ego_hist_4 != [0.0]*5 else [0.0]*5
+        relative_hist_4 = [rm / sd for rm, sd in zip(relative_hist_4, state_divisors[:5])]
+        relative_hist_3 = [(ego_hist_3[0] - position_x), (ego_hist_3[1] - position_y), (speed - ego_hist_3[2]),
+                           (acceleration - ego_hist_3[3]), (ego_hist_3[4] - heading)] \
+            if ego_hist_3 != [0.0]*5 else [0.0]*5
+        relative_hist_3 = [rm / sd for rm, sd in zip(relative_hist_3, state_divisors[:5])]
+        relative_hist_2 = [(ego_hist_2[0] - position_x), (ego_hist_2[1] - position_y), (speed - ego_hist_2[2]),
+                           (acceleration - ego_hist_2[3]), (ego_hist_2[4] - heading)] \
+            if ego_hist_2 != [0.0]*5 else [0.0]*5
+        relative_hist_2 = [rm / sd for rm, sd in zip(relative_hist_2, state_divisors[:5])]
+        relative_hist_1 = [(ego_hist_1[0] - position_x), (ego_hist_1[1] - position_y), (speed - ego_hist_1[2]),
+                           (acceleration - ego_hist_1[3]), (ego_hist_1[4] - heading)] \
+            if ego_hist_1 != [0.0]*5 else [0.0]*5
+        relative_hist_1 = [rm / sd for rm, sd in zip(relative_hist_1, state_divisors[:5])]
+        relative_current = [0.0]*5
+        ego_hist_motion[ego_id] = relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + relative_current
+        ego_last_action = flatten_list(self.actor_action[ego_id]) if self.actor_action[ego_id] != [] else [0, 0]
+        ego_last_action = [ego_last_action[0] / state_divisors[5], ego_last_action[1] / state_divisors[6]]
 
+        cav_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed, normalized_acceleration,
+                             normalized_heading]
+        ego_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed, normalized_acceleration,
+                             normalized_heading] + road_id_one_hot + ego_last_action
         cav_hist[ego_id] = []
         if self.use_hist_info:
             for i in range(self.hist_length - 1):
                 self.vehicles_hist[f'hist_{self.hist_length - i}'][ego_id] = copy.deepcopy(
                     self.vehicles_hist[f'hist_{self.hist_length - i - 1}'][ego_id])
-                hist_state = copy.deepcopy(self.vehicles_hist[f'hist_{self.hist_length - i}'][ego_id])
-                hist_state /= state_divisors
+                hist_state = copy.deepcopy(self.vehicles_hist[f'hist_{self.hist_length - i}'][ego_id][:5])
+                hist_state /= state_divisors[:5]
                 cav_hist[ego_id].extend(hist_state)
-            last_action = copy.deepcopy(self.lowercontroller_action[ego_id][-1]) if self.lowercontroller_action[
-                ego_id] else [0, 0, 0]
-            self.vehicles_hist['hist_1'][ego_id] = [position_x, position_y, speed, heading] + last_action
-            hist_state = copy.deepcopy(self.vehicles_hist['hist_1'][ego_id])
-            hist_state /= state_divisors
+            self.vehicles_hist['hist_1'][ego_id] = [position_x, position_y, speed, acceleration, heading]
+            hist_state = copy.deepcopy(self.vehicles_hist['hist_1'][ego_id][:5])
+            hist_state /= state_divisors[:5]
             cav_hist[ego_id].extend(hist_state)
 
-        # relative_hist_4 = [(ego_hist_4[0] - position_x)/700, (ego_hist_4[1] - position_y)/3.2, (speed - ego_hist_4[2])/15] if ego_hist_4[0] != 0 else [0, 0, 0]
-        # relative_hist_3 = [(ego_hist_3[0] - position_x)/700, (ego_hist_3[1] - position_y)/3.2, (speed - ego_hist_3[2])/15] if ego_hist_3[0] != 0 else [0, 0, 0]
-        # relative_hist_2 = [(ego_hist_2[0] - position_x)/700, (ego_hist_2[1] - position_y)/3.2, (speed - ego_hist_2[2])/15] if ego_hist_2[0] != 0 else [0, 0, 0]
-        # relative_hist_1 = [(ego_hist_1[0] - position_x)/700, (ego_hist_1[1] - position_y)/3.2, (speed - ego_hist_1[2])/15] if ego_hist_1[0] != 0 else [0, 0, 0]
-        # relative_current = [0, 0, 0]
-        # ego_hdv_motion[ego_id] = relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + relative_current
-        # last_action = copy.deepcopy(self.lowercontroller_action[ego_id][-1]) if self.lowercontroller_action[ego_id] else [0, 0, 0]
-        # last_action = [last_action[0]/4, last_action[1]/4, last_action[2]/15]
-        # relative_motion = relative_current + last_action
-        # relative_motion += [0] * (15 - len(relative_motion))
-        # ego_cav_motion[ego_id] = relative_motion
-    # ############################## 周车信息 ############################## 18
-    # 提取surrounding的信息
-    for ego_id, ego_info in ego_statistics.items():
-        position, speed, heading, road_id, lane_index, surroundings, expand_surroundings = ego_info
-        position_x, position_y = position
-        surround_relation_graph_simple[ego_id][1:, 1:] = 0
-        for index, (_, statistics) in enumerate(surroundings.items()):
-            relat_x, relat_y, relat_v = statistics[1:4]
-            surround_ID = statistics[0]
-            surround_vehs_stats[ego_id].append([relat_x/700, relat_y/3.2, relat_v/15])  # relat_x, relat_y, relat_v
-
-            target_hist_4 = self.vehicles_hist['hist_5'][statistics[0]]
-            target_hist_3 = self.vehicles_hist['hist_4'][statistics[0]]
-            target_hist_2 = self.vehicles_hist['hist_3'][statistics[0]]
-            target_hist_1 = self.vehicles_hist['hist_2'][statistics[0]]
-            target_hist_0 = self.vehicles_hist['hist_1'][statistics[0]]
-            relative_hist_4 = [(target_hist_4[0] - position_x), (target_hist_4[1] - position_y), (speed - target_hist_4[2]), (target_hist_4[3]-heading), target_hist_4[4],
-                               target_hist_4[5], target_hist_4[6]] if target_hist_4[0] != 0 else [0, 0, 0, 0, 0, 0, 0]
-            relative_hist_4 = [rm / sd for rm, sd in zip(relative_hist_4, state_divisors)]
-            relative_hist_3 = [(target_hist_3[0] - position_x), (target_hist_3[1] - position_y), (speed - target_hist_3[2]), (target_hist_3[3]-heading), target_hist_3[4],
-                               target_hist_3[5], target_hist_3[6]] if target_hist_3[0] != 0 else [0, 0, 0, 0, 0, 0, 0]
-            relative_hist_3 = [rm / sd for rm, sd in zip(relative_hist_3, state_divisors)]
-            relative_hist_2 = [(target_hist_2[0] - position_x), (target_hist_2[1] - position_y), (speed - target_hist_2[2]), (target_hist_2[3]-heading), target_hist_2[4],
-                               target_hist_2[5], target_hist_2[6]] if target_hist_2[0] != 0 else [0, 0, 0, 0, 0, 0, 0]
-            relative_hist_2 = [rm / sd for rm, sd in zip(relative_hist_2, state_divisors)]
-            relative_hist_1 = [(target_hist_1[0] - position_x), (target_hist_1[1] - position_y), (speed - target_hist_1[2]), (target_hist_1[3]-heading), target_hist_1[4],
-                               target_hist_1[5], target_hist_1[6]] if target_hist_1[0] != 0 else [0, 0, 0, 0, 0, 0, 0]
-            relative_hist_1 = [rm / sd for rm, sd in zip(relative_hist_1, state_divisors)]
-            relative_hist_0 = [(target_hist_0[0] - position_x), (target_hist_0[1] - position_y), (speed - target_hist_0[2]), (target_hist_0[3]-heading), target_hist_0[4],
-                               target_hist_0[5], target_hist_0[6]] if target_hist_0[0] != 0 else [0, 0, 0, 0, 0, 0, 0]
-            # relative_current_stats = [relat_x, relat_y, relat_v, 0]
-            # last_action = target_hist_0[4:]
-            # relative_hist_0 = relative_current_stats + last_action
-            relative_hist_0 = [rm / sd for rm, sd in zip(relative_hist_0, state_divisors)]
-
-            if surround_ID[:3] == 'HDV':
-                relative_motion = [0] + relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + relative_hist_0
-            else:
-                relative_motion = [1] + relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + relative_hist_0
-            surround_stats[ego_id][_] = relative_motion
-
-            for key, num in simple_surround_order.items():
-                if key in surroundings.keys():
-                    dist_x = surroundings[key][1] - relat_x
-                    dist_y = surroundings[key][2] - relat_y
-                    dist = np.sqrt(dist_x ** 2 + dist_y ** 2)
-                    if dist < 30:
-                        surround_relation_graph_simple[ego_id][num, simple_surround_order[_]] = 1
-                        surround_relation_graph_simple[ego_id][simple_surround_order[_], num] = 1
-            # if surround_ID[:3] == 'HDV':
-            #     target_hist_4 = self.vehicles_hist['hist_5'][statistics[0]]
-            #     target_hist_3 = self.vehicles_hist['hist_4'][statistics[0]]
-            #     target_hist_2 = self.vehicles_hist['hist_3'][statistics[0]]
-            #     target_hist_1 = self.vehicles_hist['hist_2'][statistics[0]]
-            #     relative_hist_4 = [(target_hist_4[0] - position_x)/700, (target_hist_4[1] - position_y)/3.2, (speed - target_hist_4[2])/15] if target_hist_4[0] != 0 else [0, 0, 0]
-            #     relative_hist_3 = [(target_hist_3[0] - position_x)/700, (target_hist_3[1] - position_y)/3.2, (speed - target_hist_3[2])/15] if target_hist_3[0] != 0 else [0, 0, 0]
-            #     relative_hist_2 = [(target_hist_2[0] - position_x)/700, (target_hist_2[1] - position_y)/3.2, (speed - target_hist_2[2])/15] if target_hist_2[0] != 0 else [0, 0, 0]
-            #     relative_hist_1 = [(target_hist_1[0] - position_x)/700, (target_hist_1[1] - position_y)/3.2, (speed - target_hist_1[2])/15] if target_hist_1[0] != 0 else [0, 0, 0]
-            #     relative_current = [relat_x/700, relat_y/3.2, relat_v/15]
-            #     relative_motion = [0] + relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + relative_current
-            #     surround_stats[ego_id].append(relative_motion)
-            # elif surround_ID[:3] == 'CAV':
-            #     relative_current = [relat_x/700, relat_y/3.2, relat_v/15]
-            #     last_action = copy.deepcopy(self.lowercontroller_action[ego_id][-1]) if self.lowercontroller_action[statistics[0]] else [0, 0, 0]
-            #     last_action = [last_action[0]/4, last_action[1]/4, last_action[2]/15]
-            #     relative_motion = [1] + relative_current + last_action
-            #     if len(relative_motion) < 16:
-            #         relative_motion += [0] * (16 - len(relative_motion))
-            #     surround_stats[ego_id].append(relative_motion)
-            vehicle_relation_graph[vehicle_order[ego_id], vehicle_order[statistics[0]]] = 1
-            vehicle_relation_graph[vehicle_order[statistics[0]], vehicle_order[ego_id]] = 1
-
-    # convert to 2D array
+        if position_y < 5 and 90 <= heading < 180:
+            next_node[ego_id] = [node_positions['J1'][0] / state_divisors[0],
+                                 node_positions['J1'][1] / state_divisors[1]]
+            dis_next_node = 1 - normalized_position_x
+        elif position_x > 195 and 0 <= heading <= 90:
+            next_node[ego_id] = [node_positions['J2'][0] / state_divisors[0],
+                                 node_positions['J2'][1] / state_divisors[1]]
+            dis_next_node = 1 - normalized_position_y
+        elif position_y > 195 and 270 <= heading < 360:
+            next_node[ego_id] = [node_positions['J3'][0] / state_divisors[0],
+                                 node_positions['J3'][1] / state_divisors[1]]
+            dis_next_node = normalized_position_x
+        else:
+            next_node[ego_id] = [node_positions['J0'][0] / state_divisors[0],
+                                 node_positions['J0'][1] / state_divisors[1]]
+            dis_next_node = normalized_position_y
+        next_node[ego_id].append(dis_next_node)
     for i in range(self.max_num_CAVs):
-        if 'CAV_'+str(i) not in cav_stats:
-            cav_stats['CAV_'+str(i)] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-            cav_hist['CAV_'+str(i)] = np.zeros(7*self.hist_length, dtype=np.float32)
-    cav_stats = dict(sorted(cav_stats.items(), key=lambda x: int(x[0].split('_')[1])))
-    cav_hist = dict(sorted(cav_hist.items(), key=lambda x: int(x[0].split('_')[1])))
+        if 'CAV_' + str(i) not in cav_stats:
+            cav_stats['CAV_' + str(i)] = [0.0] * 5
+            cav_hist['CAV_' + str(i)] = [0.0] * (5 * self.hist_length)
+    # cav_stats = dict(sorted(cav_stats.items(), key=lambda x: int(x[0].split('_')[1])))
+    # cav_hist = dict(sorted(cav_hist.items(), key=lambda x: int(x[0].split('_')[1])))
     cav_stats = np.array(list(cav_stats.values()))
     cav_hist = np.array(list(cav_hist.values()))
-    if 0 < cav_stats.shape[0] <= self.max_num_CAVs:
-        # add 0 to make sure the shape is (12, 13)
-        cav_stats = np.vstack([cav_stats, np.zeros((self.max_num_CAVs - cav_stats.shape[0], 7))])
-    elif cav_stats.shape[0] == 0:
-        cav_stats = np.zeros((self.max_num_CAVs, 7))
-    if 0 < cav_hist.shape[0] <= self.max_num_CAVs:
-        # add 0 to make sure the shape is (12, 7*self.hist_length)
-        cav_hist = np.vstack([cav_hist, np.zeros((self.max_num_CAVs - cav_hist.shape[0], 7*self.hist_length))])
-    elif cav_hist.shape[0] == 0:
-        cav_hist = np.zeros((self.max_num_CAVs, 7*self.hist_length))
+        # ############################## 周车信息 ##############################
+    for ego_id, ego_info in ego_statistics.items():
+        position, speed, acceleration, heading, road_id, lane_index, surroundings_2, surroundings_4, surroundings_6 = ego_info
+        position_x, position_y = position
+        for index, (_, statistics) in enumerate(surroundings_2.items()):
+            surround_ID, veh_type, relat_x, relat_y, relat_v, veh_acc, veh_heading = statistics[:7]
+            surround_2_vehs_stats[ego_id].append(
+                [veh_type, relat_x / state_divisors[0], relat_y / state_divisors[1], relat_v / state_divisors[2],
+                 veh_acc / state_divisors[3], veh_heading / state_divisors[4]])
+            target_hist_4 = self.vehicles_hist['hist_5'][surround_ID]
+            target_hist_3 = self.vehicles_hist['hist_4'][surround_ID]
+            target_hist_2 = self.vehicles_hist['hist_3'][surround_ID]
+            target_hist_1 = self.vehicles_hist['hist_2'][surround_ID]
+            target_hist_0 = self.vehicles_hist['hist_1'][surround_ID]
+            relative_hist_4 = [(target_hist_4[0] - position_x), (target_hist_4[1] - position_y),
+                               (speed - target_hist_4[2]), (acceleration - target_hist_4[3]), (target_hist_4[4] - heading)] \
+                            if target_hist_4 != [0.0]*5 else [0.0]*5
+            relative_hist_4 = [rm / sd for rm, sd in zip(relative_hist_4, state_divisors[:5])]
+            relative_hist_3 = [(target_hist_3[0] - position_x), (target_hist_3[1] - position_y),
+                               (speed - target_hist_3[2]), (acceleration - target_hist_3[3]), (target_hist_3[4] - heading)] \
+                            if target_hist_3 != [0.0]*5 else [0.0]*5
+            relative_hist_3 = [rm / sd for rm, sd in zip(relative_hist_3, state_divisors[:5])]
+            relative_hist_2 = [(target_hist_2[0] - position_x), (target_hist_2[1] - position_y),
+                               (speed - target_hist_2[2]), (acceleration - target_hist_2[3]), (target_hist_2[4] - heading)] \
+                            if target_hist_2 != [0.0]*5 else [0.0]*5
+            relative_hist_2 = [rm / sd for rm, sd in zip(relative_hist_2, state_divisors[:5])]
+            relative_hist_1 = [(target_hist_1[0] - position_x), (target_hist_1[1] - position_y),
+                               (speed - target_hist_1[2]), (acceleration - target_hist_1[3]), (target_hist_1[4] - heading)] \
+                            if target_hist_1 != [0.0]*5 else [0.0]*5
+            relative_hist_1 = [rm / sd for rm, sd in zip(relative_hist_1, state_divisors[:5])]
+            relative_hist_0 = [(target_hist_0[0] - position_x), (target_hist_0[1] - position_y),
+                               (speed - target_hist_0[2]), (acceleration - target_hist_0[3]), (target_hist_0[4] - heading)] \
+                            if target_hist_0 != [0.0]*5 else [0.0]*5
+            relative_hist_0 = [rm / sd for rm, sd in zip(relative_hist_0, state_divisors[:5])]
+            relative_motion = [veh_type] + relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + relative_hist_0
+            surround_2_stats[ego_id][_] = relative_motion
+        for index, (_, statistics) in enumerate(surroundings_4.items()):
+            surround_ID, veh_type, relat_x, relat_y, relat_v, veh_acc, veh_heading = statistics[:7]
+            surround_4_vehs_stats[ego_id].append(
+                [veh_type, relat_x / state_divisors[0], relat_y / state_divisors[1], relat_v / state_divisors[2],
+                 veh_acc / state_divisors[3], veh_heading / state_divisors[4]])
+            target_hist_4 = self.vehicles_hist['hist_5'][surround_ID]
+            target_hist_3 = self.vehicles_hist['hist_4'][surround_ID]
+            target_hist_2 = self.vehicles_hist['hist_3'][surround_ID]
+            target_hist_1 = self.vehicles_hist['hist_2'][surround_ID]
+            target_hist_0 = self.vehicles_hist['hist_1'][surround_ID]
+            relative_hist_4 = [(target_hist_4[0] - position_x), (target_hist_4[1] - position_y),
+                               (speed - target_hist_4[2]), (acceleration - target_hist_4[3]), (target_hist_4[4] - heading)] \
+                            if target_hist_4 != [0.0]*5 else [0.0]*5
+            relative_hist_4 = [rm / sd for rm, sd in zip(relative_hist_4, state_divisors[:5])]
+            relative_hist_3 = [(target_hist_3[0] - position_x), (target_hist_3[1] - position_y),
+                               (speed - target_hist_3[2]), (acceleration - target_hist_3[3]), (target_hist_3[4] - heading)] \
+                            if target_hist_3 != [0.0]*5 else [0.0]*5
+            relative_hist_3 = [rm / sd for rm, sd in zip(relative_hist_3, state_divisors[:5])]
+            relative_hist_2 = [(target_hist_2[0] - position_x), (target_hist_2[1] - position_y),
+                               (speed - target_hist_2[2]), (acceleration - target_hist_2[3]), (target_hist_2[4] - heading)] \
+                            if target_hist_2 != [0.0]*5 else [0.0]*5
+            relative_hist_2 = [rm / sd for rm, sd in zip(relative_hist_2, state_divisors[:5])]
+            relative_hist_1 = [(target_hist_1[0] - position_x), (target_hist_1[1] - position_y),
+                               (speed - target_hist_1[2]), (acceleration - target_hist_1[3]), (target_hist_1[4] - heading)] \
+                            if target_hist_1 != [0.0]*5 else [0.0]*5
+            relative_hist_1 = [rm / sd for rm, sd in zip(relative_hist_1, state_divisors[:5])]
+            relative_hist_0 = [(target_hist_0[0] - position_x), (target_hist_0[1] - position_y),
+                               (speed - target_hist_0[2]), (acceleration - target_hist_0[3]), (target_hist_0[4] - heading)] \
+                            if target_hist_0 != [0.0]*5 else [0.0]*5
+            relative_hist_0 = [rm / sd for rm, sd in zip(relative_hist_0, state_divisors[:5])]
+            relative_motion = [veh_type] + relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + relative_hist_0
+            surround_4_stats[ego_id][_] = relative_motion
+        for index, (_, statistics) in enumerate(surroundings_6.items()):
+            surround_ID, veh_type, relat_x, relat_y, relat_v, veh_acc, veh_heading = statistics[:7]
+            surround_6_vehs_stats[ego_id].append(
+                [veh_type, relat_x / state_divisors[0], relat_y / state_divisors[1], relat_v / state_divisors[2],
+                 veh_acc / state_divisors[3], veh_heading / state_divisors[4]])
+            target_hist_4 = self.vehicles_hist['hist_5'][surround_ID]
+            target_hist_3 = self.vehicles_hist['hist_4'][surround_ID]
+            target_hist_2 = self.vehicles_hist['hist_3'][surround_ID]
+            target_hist_1 = self.vehicles_hist['hist_2'][surround_ID]
+            target_hist_0 = self.vehicles_hist['hist_1'][surround_ID]
+            relative_hist_4 = [(target_hist_4[0] - position_x), (target_hist_4[1] - position_y),
+                               (speed - target_hist_4[2]), (acceleration - target_hist_4[3]), (target_hist_4[4] - heading)] \
+                            if target_hist_4 != [0.0]*5 else [0.0]*5
+            relative_hist_4 = [rm / sd for rm, sd in zip(relative_hist_4, state_divisors[:5])]
+            relative_hist_3 = [(target_hist_3[0] - position_x), (target_hist_3[1] - position_y),
+                               (speed - target_hist_3[2]), (acceleration - target_hist_3[3]), (target_hist_3[4] - heading)] \
+                            if target_hist_3 != [0.0]*5 else [0.0]*5
+            relative_hist_3 = [rm / sd for rm, sd in zip(relative_hist_3, state_divisors[:5])]
+            relative_hist_2 = [(target_hist_2[0] - position_x), (target_hist_2[1] - position_y),
+                               (speed - target_hist_2[2]), (acceleration - target_hist_2[3]), (target_hist_2[4] - heading)] \
+                            if target_hist_2 != [0.0]*5 else [0.0]*5
+            relative_hist_2 = [rm / sd for rm, sd in zip(relative_hist_2, state_divisors[:5])]
+            relative_hist_1 = [(target_hist_1[0] - position_x), (target_hist_1[1] - position_y),
+                               (speed - target_hist_1[2]), (acceleration - target_hist_1[3]), (target_hist_1[4] - heading)] \
+                            if target_hist_1 != [0.0]*5 else [0.0]*5
+            relative_hist_1 = [rm / sd for rm, sd in zip(relative_hist_1, state_divisors[:5])]
+            relative_hist_0 = [(target_hist_0[0] - position_x), (target_hist_0[1] - position_y),
+                               (speed - target_hist_0[2]), (acceleration - target_hist_0[3]), (target_hist_0[4] - heading)] \
+                            if target_hist_0 != [0.0]*5 else [0.0]*5
+            relative_hist_0 = [rm / sd for rm, sd in zip(relative_hist_0, state_divisors[:5])]
+            relative_motion = [veh_type] + relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + relative_hist_0
+            surround_6_stats[ego_id][_] = relative_motion
 
     if len(ego_stats) != len(ego_ids):
         for ego_id in ego_ids:
             if ego_id not in ego_stats:
-                ego_stats[ego_id] = [0.0] * 13
+                ego_stats[ego_id] = [0.0] * 11
 
     # ############################## lane_statistics 的信息 ############################## 18
     # Initialize a list to hold all lane statistics
     all_lane_stats = {}
-    all_lane_stats_overall = {}
-    all_lane_state_current = {}
-    all_lane_evolution = {lane_id: [] for lane_id in lane_statistics.keys()}
+    all_lane_distribution = {}
+    all_lane_state_simple = {}
 
     # Iterate over all possible lanes to get their statistics
     for lane_id, lane_info in lane_statistics.items():
@@ -1042,165 +1011,83 @@ def compute_hierarchical_ego_vehicle_features(
         # - lane_CAV_penetration: 这个车道上的CAV占比 1
 
         # all_lane_stats[lane_id] = lane_info[:4] + lane_info[6:7] + lane_info[9:10]
-        lane_info[0] = lane_info[0] / 10
-        lane_info[2] = lane_info[2] / 700
-        lane_info[3] = lane_info[3] / 15
-        lane_info[14] = lane_info[14] / np.array([700, 15])
-        all_lane_stats[lane_id] = lane_info[:4] + lane_info[6:7] + lane_info[13:14]
-        all_lane_stats_overall[lane_id] = lane_info[:4] + lane_info[6:7] + lane_info[13:14] + lane_info[14:]
-        all_lane_state_current[lane_id] = flatten_list(all_lane_stats_overall[lane_id])
-        if self.use_hist_info:
-            for i in range(self.hist_length - 1):
-                self.lanes_hist[f'hist_{self.hist_length - i}'][lane_id] = copy.deepcopy(
-                    self.lanes_hist[f'hist_{self.hist_length - i - 1}'][lane_id])
-                all_lane_evolution[lane_id].append(self.lanes_hist[f'hist_{self.hist_length - i}'][lane_id])
-            self.lanes_hist['hist_1'][lane_id] = all_lane_state_current[lane_id]
-            all_lane_evolution[lane_id].append(all_lane_state_current[lane_id])
-
-    ego_lane_stats = {}
-    left_lane_stats = {}
-    right_lane_stats = {}
-    for ego_id in ego_statistics.keys():
-        ego_lane = f'{ego_statistics[ego_id][3]}_{ego_statistics[ego_id][4]}'
+        lane_info[0] = lane_info[0] / self.lane_max_num_vehs
+        lane_info[2] = lane_info[2] / state_divisors[0]
+        lane_info[3] = lane_info[3] / 20
+        lane_info[17] = lane_info[17] / state_divisors[0:2]
+        lane_info[18] = lane_info[18] / state_divisors[0:2]
+        selected_lane_info = lane_info[17:18] + lane_info[18:19] + lane_info[:4] + lane_info[6:7] + lane_info[16:17]
+        selected_lane_info = flatten_list(selected_lane_info)
+        all_lane_stats[lane_id] = selected_lane_info
+        all_lane_distribution[lane_id] = lane_info[19]
+    for ego_id, ego_info in ego_statistics.items():
+        # ############################## 自己车的信息 ############################## 13
+        position, speed, acceleration, heading, road_id, lane_index, surroundings_2, surroundings_4, surroundings_6 = ego_info
+        ego_lane = f'{road_id}_{lane_index}'
         ego_lane_stats[ego_id] = all_lane_stats[ego_lane]
-        ego_lane_index = ego_statistics[ego_id][4]
-        if ego_lane_index > 0:
-            right_lane = f'{ego_statistics[ego_id][3]}_{ego_lane_index - 1}'
-            right_lane_stats[ego_id] = all_lane_stats[right_lane]
+        if ego_lane == 'E0_0':
+            next_lane = 'E1_0'
+        elif ego_lane == 'E1_0':
+            next_lane = 'E0_0'
+        elif ego_lane == 'E2_0':
+            next_lane = 'E3_0'
         else:
-            right_lane_stats[ego_id] = np.zeros(6)
-        if ego_lane_index < edge_lane_num[ego_statistics[ego_id][3]]-1:
-            left_lane = f'{ego_statistics[ego_id][3]}_{ego_lane_index + 1}'
-            left_lane_stats[ego_id] = all_lane_stats[left_lane]
-        else:
-            left_lane_stats[ego_id]= np.zeros(6)
+            next_lane = 'E0_0'
+        next_lane_stats[ego_id] = all_lane_stats[next_lane]
 
     # convert to 2D array (18 * 6)
-    all_lane_stats = np.array(list(all_lane_stats.values()))
-    all_lane_stats_evolution = np.array(list(all_lane_evolution.values()))
-
-    # ############################## bottle_neck 的信息 ##############################
-    # 车辆距离bottle_neck
-    bottle_neck_position_x = bottle_neck_positions[0] / 700
-    bottle_neck_position_y = bottle_neck_positions[1]
+    all_lane_stats = flatten_list(list(all_lane_stats.values()))
+    all_lane_distribution = flatten_list(list(all_lane_distribution.values()))
 
     feature_vector = {}
-    feature_vector['road_structure'] = np.array([0, 0, bottle_neck_position_x, bottle_neck_position_y, 4,
-                                                 bottle_neck_position_x, bottle_neck_position_y, 1, 0, 2])
-    feature_vector['bottle_neck_position'] = np.array([bottle_neck_position_x, bottle_neck_position_y])
-    feature_vector['road_end'] = np.array([1, 0])
+    # feature_vector['road_structure'] = np.array([0, 0, bottle_neck_position_x, bottle_neck_position_y, 4,
+    #                                              bottle_neck_position_x, bottle_neck_position_y, 1, 0, 2])
+    feature_vector['road_structure'] = np.array([0, 0, 1, 0, 1, 1, 0, 1])
 
-    veh_target = get_target(ego_statistics, lane_statistics)
     feature_vectors_current = {}
-    shared_feature_vectors = {}
-    flat_surround_vehs = {key: [] for key in ego_ids}
-    flat_expand_surround = {key: [] for key in ego_ids}
-    flat_surround_IDs = {key: [] for key in ego_ids}
-    flat_surround_relation = {key: [] for key in ego_ids}
-    for ego_id, ego_info in ego_statistics.items():
-        position, speed, heading, road_id, lane_index, surroundings, expand_surroundings = ego_info
-        position_x, position_y = position
-        surround_IDs[ego_id]['ego'] = int(ego_id[4:]) + 200
-        surround_relation_graph[ego_id][1:, 1:] = 0
-        ego_hist_4 = self.vehicles_hist['hist_5'][ego_id]
-        ego_hist_3 = self.vehicles_hist['hist_4'][ego_id]
-        ego_hist_2 = self.vehicles_hist['hist_3'][ego_id]
-        ego_hist_1 = self.vehicles_hist['hist_2'][ego_id]
-        relative_hist_4 = [(ego_hist_4[0] - position_x)/700, (ego_hist_4[1] - position_y)/3.2,
-                           (speed - ego_hist_4[2])/15, (ego_hist_4[3] - heading)/360] if ego_hist_4[0] != 0 else [0, 0, 0, 0]
-        relative_hist_3 = [(ego_hist_3[0] - position_x)/700, (ego_hist_3[1] - position_y)/3.2,
-                           (speed - ego_hist_3[2])/15, (ego_hist_3[3] - heading)/360] if ego_hist_3[0] != 0 else [0, 0, 0, 0]
-        relative_hist_2 = [(ego_hist_2[0] - position_x)/700, (ego_hist_2[1] - position_y)/3.2,
-                           (speed - ego_hist_2[2])/15, (ego_hist_2[3] - heading)/360] if ego_hist_2[0] != 0 else [0, 0, 0, 0]
-        relative_hist_1 = [(ego_hist_1[0] - position_x)/700, (ego_hist_1[1] - position_y)/3.2,
-                           (speed - ego_hist_1[2])/15, (ego_hist_1[3] - heading)/360] if ego_hist_1[0] != 0 else [0, 0, 0, 0]
-        reltaive_current = [0, 0, 0, 0]
-        ego_motion = relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + reltaive_current
-        expand_surround_stats[ego_id]['ego'] = ego_motion
-        for index, (_, statistics) in enumerate(expand_surroundings.items()):
-            relat_x, relat_y, relat_v = statistics[1:4]
-            target_hist_4 = self.vehicles_hist['hist_5'][statistics[0]]
-            target_hist_3 = self.vehicles_hist['hist_4'][statistics[0]]
-            target_hist_2 = self.vehicles_hist['hist_3'][statistics[0]]
-            target_hist_1 = self.vehicles_hist['hist_2'][statistics[0]]
-            relative_hist_4 = [(target_hist_4[0] - position_x)/700, (target_hist_4[1] - position_y)/3.2,
-                               (speed - target_hist_4[2])/15, (target_hist_4[3] - heading)/360] if target_hist_4[0] != 0 else [0, 0, 0, 0]
-            relative_hist_3 = [(target_hist_3[0] - position_x)/700, (target_hist_3[1] - position_y)/3.2,
-                               (speed - target_hist_3[2])/15, (target_hist_3[3] - heading)/360] if target_hist_3[0] != 0 else [0, 0, 0, 0]
-            relative_hist_2 = [(target_hist_2[0] - position_x)/700, (target_hist_2[1] - position_y)/3.2,
-                               (speed - target_hist_2[2])/15, (target_hist_2[3] - heading)/360] if target_hist_2[0] != 0 else [0, 0, 0, 0]
-            relative_hist_1 = [(target_hist_1[0] - position_x)/700, (target_hist_1[1] - position_y)/3.2,
-                               (speed - target_hist_1[2])/15, (target_hist_1[3] - heading)/360] if target_hist_1[0] != 0 else [0, 0, 0, 0]
-            reltaive_current = [relat_x/700, relat_y/3.2, relat_v/15, 0]
-            relative_motion = relative_hist_4 + relative_hist_3 + relative_hist_2 + relative_hist_1 + reltaive_current
-            expand_surround_stats[ego_id][_] = relative_motion
-            if statistics[0][:3] == 'HDV':
-                surround_IDs[ego_id][_] = int(statistics[0][4:]) + 100
-            else:
-                surround_IDs[ego_id][_] = int(statistics[0][4:]) + 200
-            for key, num in surround_order.items():
-                if key in expand_surroundings.keys():
-                    dist_x = expand_surroundings[key][1] - relat_x
-                    dist_y = expand_surroundings[key][2] - relat_y
-                    dist = np.sqrt(dist_x ** 2 + dist_y ** 2)
-                    if dist < 30:
-                        surround_relation_graph[ego_id][num, surround_order[_]] = 1
-                        surround_relation_graph[ego_id][surround_order[_], num] = 1
-
-
+    shared_feature_vectors_current = {}
+    flat_surround_2_vehs = {key: [] for key in next_node.keys()}
+    flat_surround_4_vehs = {key: [] for key in next_node.keys()}
+    flat_surround_6_vehs = {key: [] for key in next_node.keys()}
+    for ego_id in ego_statistics.keys():
         feature_vectors_current[ego_id] = feature_vector.copy()
-        feature_vectors_current[ego_id]['target'] = veh_target[ego_id]
-        feature_vectors_current[ego_id]['self_stats'] = ego_stats[ego_id]
-        feature_vectors_current[ego_id]['distance_bott'] = np.array([bottle_neck_position_x - ego_stats[ego_id][0], 0])
-        feature_vectors_current[ego_id]['distance_end'] = np.array([1 - ego_stats[ego_id][0], 0])
-        last_actor_action = copy.deepcopy(self.actor_action[ego_id][-1]) if self.actor_action[ego_id] else [0, 0, 0]
-        last_actor_action = [last_actor_action[0] / 4, last_actor_action[1] / 4, last_actor_action[2] / 15]
-        feature_vectors_current[ego_id]['actor_action'] = np.array(last_actor_action)
-        last_actual_action = copy.deepcopy(self.lowercontroller_action[ego_id][-1]) if self.lowercontroller_action[ego_id] else [0, 0, 0]
-        last_actual_action = [last_actual_action[0] / 4, last_actual_action[1] / 4, last_actual_action[2] / 15]
-        feature_vectors_current[ego_id]['actual_action'] = np.array(last_actual_action)
-        # feature_vectors_current[ego_id]['ego_cav_motion'] = np.array(ego_cav_motion[ego_id])
-        # feature_vectors_current[ego_id]['ego_hdv_motion'] = np.array(ego_hdv_motion[ego_id])
-        feature_vectors_current[ego_id]['ego_hist_motion'] = np.array(ego_hist_motion[ego_id])
-
-        # flat_surround_vehs[ego_id] = [item for sublist in surround_stats[ego_id] for item in sublist]
-        # if len(flat_surround_vehs[ego_id]) < 6*36:
-        #     flat_surround_vehs[ego_id] += [0] * (6*36 - len(flat_surround_vehs[ego_id]))
-        flat_surround_vehs[ego_id] = flatten_to_1d(surround_stats[ego_id])
-        feature_vectors_current[ego_id]['surround_stats'] = flat_surround_vehs[ego_id]
-        feature_vectors_current[ego_id]['surround_relation_graph_simple'] = surround_relation_graph_simple[ego_id]
-
-        flat_expand_surround[ego_id] = flatten_to_1d(expand_surround_stats[ego_id])
-        feature_vectors_current[ego_id]['expand_surround_stats'] = flat_expand_surround[ego_id]
-        # flat_surround_relation[ego_id] = [item for sublist in surround_relation_graph[ego_id] for item in sublist]
-        feature_vectors_current[ego_id]['surround_relation_graph'] = surround_relation_graph[ego_id]
-
-        for key in surround_IDs[ego_id]:
-            flat_surround_IDs[ego_id].append(surround_IDs[ego_id][key])
-        feature_vectors_current[ego_id]['surround_IDs'] = flat_surround_IDs[ego_id]
-
+        feature_vectors_current[ego_id]['next_node'] = next_node[ego_id]
+        feature_vectors_current[ego_id]['self_stats'] = [1] + ego_stats[ego_id]
+        feature_vectors_current[ego_id]['self_hist_stats'] = [1] + ego_hist_motion[ego_id]
+        flat_surround_2_vehs[ego_id] = [item for sublist in surround_2_stats[ego_id].values() for item in sublist]
+        if len(flat_surround_2_vehs[ego_id]) < 2*(1 + self.hist_length * 5):
+            flat_surround_2_vehs[ego_id] += [0] * (2*(1 + self.hist_length * 5) - len(flat_surround_2_vehs[ego_id]))
+        feature_vectors_current[ego_id]['surround_2_vehs_stats'] = flat_surround_2_vehs[ego_id]
+        flat_surround_4_vehs[ego_id] = [item for sublist in surround_4_stats[ego_id].values() for item in sublist]
+        if len(flat_surround_4_vehs[ego_id]) < 4*(1 + self.hist_length * 5):
+            flat_surround_4_vehs[ego_id] += [0] * (4*(1 + self.hist_length * 5) - len(flat_surround_4_vehs[ego_id]))
+        feature_vectors_current[ego_id]['surround_4_vehs_stats'] = flat_surround_4_vehs[ego_id]
+        flat_surround_6_vehs[ego_id] = [item for sublist in surround_6_stats[ego_id].values() for item in sublist]
+        if len(flat_surround_6_vehs[ego_id]) < 6*(1 + self.hist_length * 5):
+            flat_surround_6_vehs[ego_id] += [0] * (6*(1 + self.hist_length * 5) - len(flat_surround_6_vehs[ego_id]))
+        feature_vectors_current[ego_id]['surround_6_vehs_stats'] = flat_surround_6_vehs[ego_id]
         feature_vectors_current[ego_id]['ego_lane_stats'] = ego_lane_stats[ego_id]
-        feature_vectors_current[ego_id]['left_lane_stats'] = left_lane_stats[ego_id]
-        feature_vectors_current[ego_id]['right_lane_stats'] = right_lane_stats[ego_id]
+        feature_vectors_current[ego_id]['next_lane_stats'] = next_lane_stats[ego_id]
 
-        feature_vectors_current[ego_id]['hdv_stats'] = hdv_stats
-        feature_vectors_current[ego_id]['cav_stats'] = cav_stats
-
-        # shared_feature_vectors[ego_id] = feature_vector.copy()  # EP mode
-        shared_feature_vectors[ego_id] = copy.deepcopy(feature_vectors_current[ego_id])  # FP mode
-        shared_feature_vectors[ego_id]['veh_relation'] = vehicle_relation_graph
-        shared_feature_vectors[ego_id]['all_lane_stats'] = all_lane_stats
-        shared_feature_vectors[ego_id]['all_lane_evolution'] = all_lane_stats_evolution
-        shared_feature_vectors[ego_id]['hdv_hist'] = hdv_hist
-        shared_feature_vectors[ego_id]['cav_hist'] = cav_hist
+        shared_feature_vectors_current[ego_id] = feature_vector.copy()
+        shared_feature_vectors_current[ego_id]['hdv_stats'] = hdv_stats
+        shared_feature_vectors_current[ego_id]['cav_stats'] = cav_stats
+        shared_feature_vectors_current[ego_id]['lane_stats'] = all_lane_stats
+        shared_feature_vectors_current[ego_id]['lane_distribution'] = all_lane_distribution
 
     # Flatten the dictionary structure
-    feature_vectors_current_flatten = {ego_id: flatten_to_1d(feature_vectors) for ego_id, feature_vectors in
-                               feature_vectors_current.items()}
+    # feature_vectors_current_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
+    #                            feature_vectors_current.items()}
+    feature_vectors = {key: {} for key in ego_statistics.keys()}
 
-    shared_feature_vectors_flatten = {ego_id: flatten_to_1d(shared_feature_vector) for ego_id, shared_feature_vector in shared_feature_vectors.items()}
+    for ego_id, feature_vector_current in feature_vectors_current.items():
+        feature_vectors[ego_id] = feature_vector_current
+    feature_vectors_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
+                               feature_vectors.items()}
 
-    return shared_feature_vectors, shared_feature_vectors_flatten, feature_vectors_current, feature_vectors_current_flatten
+    shared_feature_flatten = {ego_id: flatten_to_1d(shared_feature_vector) for ego_id, shared_feature_vector in
+                              shared_feature_vectors_current.items()}
+    return shared_feature_vectors_current, shared_feature_flatten, feature_vectors, feature_vectors_flatten
 
 def compute_centralized_vehicle_features(lane_statistics, feature_vectors, bottle_neck_positions):
     shared_features = {}

@@ -88,7 +88,9 @@ def generate_scenario(
     else:
         i_CAV = 0
         i_HDV = 0
-        if CAV_penetration == 0.1:
+        if CAV_penetration == 0.0:
+            distribution = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        elif CAV_penetration == 0.1:
             distribution = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
         elif CAV_penetration == 0.2:
             distribution = [0, 0, 1, 0, 0, 0, 0, 1, 0, 0]
@@ -118,34 +120,34 @@ def generate_scenario(
                 veh_type = f'HDV_{int(random_HDVs[i_HDV])}'
                 veh_id = f'HDV_{i_HDV}'
                 i_HDV += 1
-            E0_start = 10
-            E1_start = 10
-            E2_start = 10
-            E3_start = 10
+            E0_start = 5
+            E1_start = 5
+            E2_start = 5
+            E3_start = 5
             if i_all < lane_veh_num:
                 route_id = 'route_0'
                 if i_all == 0:
-                    depart_pos = E0_start + pos_change + 5
+                    depart_pos = E0_start + 5
                 else:
-                    depart_pos = depart_pos + veh_gap + pos_change + 5
+                    depart_pos = depart_pos + veh_gap + 5
             elif i_all < 2 * lane_veh_num:
                 route_id = 'route_1'
                 if i_all == lane_veh_num:
-                    depart_pos = E1_start + pos_change + 5
+                    depart_pos = E1_start + 5
                 else:
-                    depart_pos = depart_pos + veh_gap + pos_change + 5
+                    depart_pos = depart_pos + veh_gap + 5
             elif i_all < 3 * lane_veh_num:
                 route_id = 'route_2'
                 if i_all == 2 * lane_veh_num:
-                    depart_pos = E2_start + pos_change + 5
+                    depart_pos = E2_start + 5
                 else:
-                    depart_pos = depart_pos + veh_gap + pos_change + 5
+                    depart_pos = depart_pos + veh_gap + 5
             else:
                 route_id = 'route_3'
                 if i_all == 3 * lane_veh_num:
-                    depart_pos = E3_start + pos_change + 5
+                    depart_pos = E3_start + 5
                 else:
-                    depart_pos = depart_pos + veh_gap + pos_change + 5
+                    depart_pos = depart_pos + veh_gap + 5
             scene_change.add(
                 vehID=veh_id,
                 typeID=veh_type,
