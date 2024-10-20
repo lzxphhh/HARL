@@ -141,14 +141,17 @@ class VehEnvWrapper(gym.Wrapper):
             # vehicles_6_state (3 front + 3 rear): type, pos_x, pos_y, speed, acceleration, heading - 6*(1+5*self.hist_length)
             # ego_lane_statistics: start, end, num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 10
             # next_lane_statistics: start, end, num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 10
-            self.self_obs_size = (8 + 3 + 12 + (1+5*self.hist_length) + (2*(1+5*self.hist_length)) + (4*(1+5*self.hist_length))
-                                  + (6 * (1 + 5 * self.hist_length)) + 2 * 10)
+            self.self_obs_size = (8 + 3 + 12 + (1+5*self.hist_length)
+                                  + (2 * (1+5*self.hist_length))
+                                  + (4 * (1+5*self.hist_length))
+                                  + (6 * (1 + 5 * self.hist_length))
+                                  + 2 * 10)
             # road_structure: four nodes' positions - 4*2
             # all_HDVs_state: pos_x, pos_y, speed, acceleration, heading - max_num_HDVs*9
             # all_CAVs_state: pos_x, pos_y, speed, acceleration, heading - max_num_CAVs*5
             # all_lane_statistics - start, end, num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 4*10
             # all_lane_distribution: each lane-veh_info: type, pos_x, pos_y, speed, acceleration, heading - 4 * (max_num_vehs_lane) *6
-            self.shared_obs_size = 8 + self.max_num_HDVs*9 + self.max_num_CAVs*5 + 4*10 + 4 * self.lane_max_num_vehs * 6
+            self.shared_obs_size = 8 + self.max_num_HDVs*9 + self.max_num_CAVs*9 + 4*10 + 4 * self.lane_max_num_vehs * 6
         self.vehicles_hist = {}
         # self.lanes_hist = {}
         if self.use_hist_info:
@@ -693,8 +696,9 @@ class VehEnvWrapper(gym.Wrapper):
 
         # 计算车辆和地图的数据
         lane_statistics, ego_statistics, reward_statistics, hdv_statistics = analyze_traffic(
-            state=state, lane_ids=self.calc_features_lane_ids
+            state=state, lane_ids=self.calc_features_lane_ids, max_veh_num=self.lane_max_num_vehs
         )
+        start_time = time.time()
 
         # 计算每个 ego vehicle 的 state 拼接为向量
         if self.strategy == 'base':
@@ -719,6 +723,8 @@ class VehEnvWrapper(gym.Wrapper):
                 node_positions=self.node_positions,
                 ego_ids=self.ego_ids,
             )
+        # end_time = time.time()
+        # print(f'Time for feature extraction: {end_time - start_time} second')
 
         return feature_vectors_current, feature_vectors_current_flatten, feature_vectors, feature_vectors_flatten, lane_statistics, ego_statistics, reward_statistics
 
