@@ -82,6 +82,7 @@ class SingleLaneEnv:
         self.share_observation_space = list(self.env.share_observation_space.values())
         self.observation_space = list(self.env.observation_space.values())
         self.action_space = list(self.env.action_space.values())
+        self.discrete = False
 
         # FOR DEBUGGING
         self.ego_ids = self.env.ego_ids
@@ -106,7 +107,7 @@ class SingleLaneEnv:
         # mean_acc = mean_acc.reshape(1, -1)
         done = np.array(list(done.values()))
 
-        self.action_command = self.env.action_command
+        self.action_command = self.env.actions  # action_command
         self.current_speed = self.env.current_speed
         self.current_lane = self.env.current_lane
         self.warn_ego_ids = self.env.warn_ego_ids
@@ -127,11 +128,24 @@ class SingleLaneEnv:
     def seed(self, seed):
         pass
 
+    # def get_avail_actions(self):
+    #
+    #     avail_actions = [[1] * self.action_space[0].n]*self.n_agents
+    #     return np.array(avail_actions)
+    #     # TODO: 换道的动作被mask掉
     def get_avail_actions(self):
+        if self.discrete:
+            avail_actions = []
+            for agent_id in range(self.n_agents):
+                avail_agent = self.get_avail_agent_actions(agent_id)
+                avail_actions.append(avail_agent)
+            return avail_actions
+        else:
+            return None
 
-        avail_actions = [[1] * self.action_space[0].n]*self.n_agents
-        return np.array(avail_actions)
-        # TODO: 换道的动作被mask掉
+    def get_avail_agent_actions(self, agent_id):
+        """Returns the available actions for agent_id"""
+        return [1] * self.action_space[agent_id].n
 
     def close(self):
         self.env.close()

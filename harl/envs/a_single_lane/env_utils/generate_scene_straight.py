@@ -21,9 +21,9 @@ def generate_scenario(
     distribution: "random" or "uniform"
     """
     veh_num = CAV_num + HDV_num
-    lane_veh_num = veh_num / 4
-    veh_gap = 190 / lane_veh_num - 5
-    start_speed = (veh_gap - 2) / 2
+    start_speed = 10
+    start_gap = 15
+    start_pos = 500
     # generate HDVs with different driving behaviors
     random_numbers_HDV = [random.random() for _ in range(HDV_num)]
     random_HDVs = []
@@ -36,20 +36,11 @@ def generate_scenario(
             random_HDVs.append(2)
     random_veh_type = [random.random() for _ in range(veh_num)]
     random_veh_distribution = []
-    veh_route = []
-    for i in range(veh_num):
+    for i in range(veh_num-2):
         if random_veh_type[i] < CAV_penetration:
             random_veh_distribution.append(1)
         else:
             random_veh_distribution.append(0)
-        if i < lane_veh_num:
-            veh_route.append(0)
-        elif i < 2 * lane_veh_num:
-            veh_route.append(1)
-        elif i < 3 * lane_veh_num:
-            veh_route.append(2)
-        else:
-            veh_route.append(3)
 
     if use_gui:
         scene_change = traci.vehicle
@@ -60,29 +51,42 @@ def generate_scenario(
     if distribution == "random":
         i_CAV = 0
         i_HDV = 0
-        for i_veh in range(veh_num):
-            if random_veh_distribution[i_veh] == 1 and i_CAV < CAV_num:
-                scene_change.add(
-                    vehID=f'CAV_{i_CAV}',
-                    typeID='ego',
-                    routeID=f'route_{int(veh_route[i_veh])}',
-                    depart="now",
-                    departPos="random",
-                    departLane="random",
-                    departSpeed=f'{start_speed}',
-                )
+        scene_change.add(
+            vehID=f'Leader',
+            typeID='leader',
+            routeID=f'route_0',
+            depart="now",
+            departPos=f'{start_pos}',
+            departLane="random",
+            departSpeed=f'{start_speed}',
+        )
+        for i_veh in range(veh_num-1):
+            if random_veh_distribution[i_veh] == 1 and i_CAV < (CAV_num-1):
+                veh_id = f'CAV_{i_CAV}'
+                veh_type = 'ego'
                 i_CAV += 1
             else:
-                scene_change.add(
-                    vehID=f'HDV_{i_HDV}',
-                    typeID=f'HDV_{int(random_HDVs[i_veh])}',
-                    routeID=f'route_{int(veh_route[i_veh])}',
-                    depart="now",
-                    departPos="random",
-                    departLane="random",
-                    departSpeed=f'{start_speed}',
-                )
+                veh_id = f'HDV_{i_HDV}'
+                veh_type = f'HDV_{int(random_HDVs[i_HDV])}'
                 i_HDV += 1
+            scene_change.add(
+                vehID=veh_id,
+                typeID=veh_type,
+                routeID=f'route_0',
+                depart="now",
+                departPos=f'{start_pos - (i_veh + 1) * (start_gap + 5)}',
+                departLane="random",
+                departSpeed=f'{start_speed}',
+            )
+        scene_change.add(
+            vehID=f'CAV_{i_CAV}',
+            typeID='ego',
+            routeID=f'route_0',
+            depart="now",
+            departPos=f'{start_pos - veh_num * (start_gap + 5)}',
+            departLane="random",
+            departSpeed=f'{start_speed}',
+        )
 
     # uniform - CAVs are uniformly distributed
     else:
@@ -91,27 +95,35 @@ def generate_scenario(
         if CAV_penetration == 0.0:
             distribution = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         elif CAV_penetration == 0.1:
-            distribution = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+            distribution = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         elif CAV_penetration == 0.2:
-            distribution = [0, 0, 1, 0, 0, 0, 0, 1, 0, 0]
+            distribution = [1, 0, 0, 0, 0, 0, 0, 1, 0, 0]
         elif CAV_penetration == 0.3:
-            distribution = [0, 1, 0, 0, 1, 0, 0, 1, 0, 0]
+            distribution = [1, 0, 0, 1, 0, 0, 0, 1, 0, 0]
         elif CAV_penetration == 0.4:
-            distribution = [0, 1, 0, 1, 0, 0, 1, 0, 1, 0]
+            distribution = [1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
         elif CAV_penetration == 0.5:
-            distribution = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+            distribution = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
         elif CAV_penetration == 0.6:
             distribution = [1, 0, 1, 0, 1, 1, 0, 1, 0, 1]
         elif CAV_penetration == 0.7:
-            distribution = [1, 0, 1, 0, 1, 1, 1, 0, 1, 1]
+            distribution = [1, 0, 1, 1, 0, 1, 1, 0, 1, 1]
         elif CAV_penetration == 0.8:
             distribution = [1, 1, 0, 1, 1, 1, 0, 1, 1, 1]
         elif CAV_penetration == 0.9:
             distribution = [1, 1, 1, 0, 1, 1, 1, 1, 1, 1]
         else:
             distribution = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-        for i_all in range(veh_num):
-            pos_change = -3+3*random.random()
+        scene_change.add(
+            vehID='Leader',
+            typeID='leader',
+            routeID=f'route_0',
+            depart="now",
+            departPos=f'{start_pos}',
+            departLane="random",
+            departSpeed=f'{start_speed}',
+        )
+        for i_all in range(veh_num-1):
             if distribution[i_all % 10] == 1 and i_CAV < CAV_num:
                 veh_type = 'ego'
                 veh_id = f'CAV_{i_CAV}'
@@ -120,40 +132,21 @@ def generate_scenario(
                 veh_type = f'HDV_{int(random_HDVs[i_HDV])}'
                 veh_id = f'HDV_{i_HDV}'
                 i_HDV += 1
-            E0_start = 5
-            E1_start = 5
-            E2_start = 5
-            E3_start = 5
-            if i_all < lane_veh_num:
-                route_id = 'route_0'
-                if i_all == 0:
-                    depart_pos = E0_start + 5
-                else:
-                    depart_pos = depart_pos + veh_gap + 5
-            elif i_all < 2 * lane_veh_num:
-                route_id = 'route_1'
-                if i_all == lane_veh_num:
-                    depart_pos = E1_start + 5
-                else:
-                    depart_pos = depart_pos + veh_gap + 5
-            elif i_all < 3 * lane_veh_num:
-                route_id = 'route_2'
-                if i_all == 2 * lane_veh_num:
-                    depart_pos = E2_start + 5
-                else:
-                    depart_pos = depart_pos + veh_gap + 5
-            else:
-                route_id = 'route_3'
-                if i_all == 3 * lane_veh_num:
-                    depart_pos = E3_start + 5
-                else:
-                    depart_pos = depart_pos + veh_gap + 5
             scene_change.add(
                 vehID=veh_id,
                 typeID=veh_type,
-                routeID=route_id,
+                routeID=f'route_0',
                 depart="now",
-                departPos=float(depart_pos),
+                departPos=f'{start_pos - (i_all + 1) * (start_gap + 5)}',
                 departLane="random",
                 departSpeed=f'{start_speed}',
             )
+        scene_change.add(
+            vehID=f'CAV_{i_CAV}',
+            typeID='ego',
+            routeID=f'route_0',
+            depart="now",
+            departPos=f'{start_pos - veh_num * (start_gap + 5)}',
+            departLane="random",
+            departSpeed=f'{start_speed}',
+        )

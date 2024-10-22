@@ -3,7 +3,6 @@
    <input>
       <net-file value="veh.net.xml"/>
       <route-files value="singlelane.rou.xml"/>
-      <additional-files value="circle.add.xml"/>
       <collision.action value="remove"/>
    </input>
    <time>

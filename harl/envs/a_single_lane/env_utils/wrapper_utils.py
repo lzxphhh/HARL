@@ -9,24 +9,32 @@ from itertools import chain
 import time
 
 LANE_LENGTHS = {
-    'E0': 100,
-    'E1': 100,
-    'E2': 100,
-    'E3': 100,
+    'E0': 500,
+    'E1': 2000,
+    # 'E2': 100,
+    # 'E3': 100,
 }
 
-state_divisors = np.array([100, 100, 20, 6, 360, 6, 20])
+state_divisors = np.array([2000, 3, 20, 3, 360, 6, 20])
+# Lane_start = {
+#     'E0': (0, 0),
+#     'E1': (100, 0),
+#     'E2': (100, 100),
+#     'E3': (0, 100),
+# }
+# Lane_end = {
+#     'E0': (100, 0),
+#     'E1': (100, 100),
+#     'E2': (0, 100),
+#     'E3': (0, 0),
+# }
 Lane_start = {
-    'E0': (0, 0),
-    'E1': (100, 0),
-    'E2': (100, 100),
-    'E3': (0, 100),
+    'E0': (-500, 0),
+    'E1': (0, 0),
 }
 Lane_end = {
-    'E0': (100, 0),
-    'E1': (100, 100),
-    'E2': (0, 100),
-    'E3': (0, 0),
+    'E0': (0, 0),
+    'E1': (2000, 0),
 }
 
 def analyze_traffic(state, lane_ids, max_veh_num):
@@ -91,21 +99,21 @@ def analyze_traffic(state, lane_ids, max_veh_num):
         if lane_id[:3] in [':J1']:
             lane_id = f'E1_{int(lane_index)}'
         elif lane_id[:3] in [':J2']:
-            lane_id = f'E2_{int(lane_index)}'
-        elif lane_id[:3] in [':J3']:
-            lane_id = f'E3_{int(lane_index)}'
-        elif lane_id[:3] in [':J0']:
-            lane_id = f'E0_{int(lane_index)}'
+            lane_id = f'E1_{int(lane_index)}'
+        # elif lane_id[:3] in [':J3']:
+        #     lane_id = f'E3_{int(lane_index)}'
+        # elif lane_id[:3] in [':J0']:
+        #     lane_id = f'E0_{int(lane_index)}'
 
         road_id = vehicle['road_id']  # 这个车行驶道路的 ID. eg: 'E0'
         if road_id[:3] in [':J1']:
             road_id = 'E1'
         elif road_id[:3] in [':J2']:
-            road_id = 'E2'
-        elif road_id[:3] in [':J3']:
-            road_id = 'E3'
-        elif road_id[:3] in [':J0']:
-            road_id = 'E0'
+            road_id = 'E1'
+        # elif road_id[:3] in [':J3']:
+        #     road_id = 'E3'
+        # elif road_id[:3] in [':J0']:
+        #     road_id = 'E0'
 
         lane_index = vehicle['lane_index']  # 这个车所在车道的 index eg: 2
         speed = vehicle['speed']  # vehicle当前车速
@@ -537,21 +545,21 @@ def compute_base_ego_vehicle_features(
         # 转向归一化 - 1
         normalized_heading = heading / state_divisors[4]
         # One-hot encode road_id - 5
-        road_id_one_hot = one_hot_encode(road_id, unique_edges)
+        # road_id_one_hot = one_hot_encode(road_id, unique_edges)
         # One-hot encode lane_index - 4
         # lane_index_one_hot = one_hot_encode(lane_index, list(range(edge_lane_num.get(road_id, 0))))
         # # 如果车道数不足4个, 补0 对齐到最多数量的lane num
         # if len(lane_index_one_hot) < 4:
         #     lane_index_one_hot += [0] * (4 - len(lane_index_one_hot))
         hdv_stats[hdv_id] = [normalized_position_x, normalized_position_y, normalized_speed, normalized_acceleration,
-                             normalized_heading] + road_id_one_hot
+                             normalized_heading]  # + road_id_one_hot
     # convert to 2D array (12 * 13)  - 12 is max number of HDVs
     hdv_stats = np.array(list(hdv_stats.values()))
     if 0 < hdv_stats.shape[0] <= self.max_num_HDVs:
         # add 0 to make sure the shape is (12, 13)
-        hdv_stats = np.vstack([hdv_stats, np.zeros((self.max_num_HDVs - hdv_stats.shape[0], 9))])
+        hdv_stats = np.vstack([hdv_stats, np.zeros((self.max_num_HDVs - hdv_stats.shape[0], 5))])
     elif hdv_stats.shape[0] == 0:
-        hdv_stats = np.zeros((self.max_num_HDVs, 9))
+        hdv_stats = np.zeros((self.max_num_HDVs, 5))
     # ############################## 所有CAV的信息 ############################## 13
     cav_stats = {}
     ego_stats = {}
@@ -570,26 +578,30 @@ def compute_base_ego_vehicle_features(
         position_x, position_y = position
         normalized_position_x = position_x / state_divisors[0]
         normalized_position_y = position_y / state_divisors[1]
-        # 转向归一化 - 1
-        if heading < 0:
-            heading += 360
-        elif heading > 360:
-            heading -= 360
+        # # 转向归一化 - 1
+        # if heading < 0:
+        #     heading += 360
+        # elif heading > 360:
+        #     heading -= 360
         normalized_heading = heading / state_divisors[4]
         # One-hot encode road_id - 5
-        road_id_one_hot = one_hot_encode(road_id, unique_edges)
-        if position_y < 5 and 90 <= heading < 180:
-            next_node[ego_id] = [node_positions['J1'][0]/state_divisors[0], node_positions['J1'][1]/state_divisors[1]]
-            dis_next_node = 1 - normalized_position_x
-        elif position_x > 195 and 0 <= heading <= 90:
-            next_node[ego_id] = [node_positions['J2'][0]/state_divisors[0], node_positions['J2'][1]/state_divisors[1]]
-            dis_next_node = 1 - normalized_position_y
-        elif position_y > 195 and 270 <= heading < 360:
-            next_node[ego_id] = [node_positions['J3'][0]/state_divisors[0], node_positions['J3'][1]/state_divisors[1]]
-            dis_next_node = normalized_position_x
-        else:
-            next_node[ego_id] = [node_positions['J0'][0]/state_divisors[0], node_positions['J0'][1]/state_divisors[1]]
-            dis_next_node = normalized_position_y
+        # road_id_one_hot = one_hot_encode(road_id, unique_edges)
+        # if position_y < 5 and 90 <= heading < 180:
+        #     next_node[ego_id] = [node_positions['J1'][0]/state_divisors[0], node_positions['J1'][1]/state_divisors[1]]
+        #     dis_next_node = 1 - normalized_position_x
+        # elif position_x > 95 and 0 <= heading <= 90:
+        #     next_node[ego_id] = [node_positions['J2'][0]/state_divisors[0], node_positions['J2'][1]/state_divisors[1]]
+        #     dis_next_node = 1 - normalized_position_y
+        # elif position_y > 95 and 270 <= heading < 360:
+        #     next_node[ego_id] = [node_positions['J3'][0]/state_divisors[0], node_positions['J3'][1]/state_divisors[1]]
+        #     dis_next_node = normalized_position_x
+        # else:
+        #     next_node[ego_id] = [node_positions['J0'][0]/state_divisors[0], node_positions['J0'][1]/state_divisors[1]]
+        #     dis_next_node = normalized_position_y
+        # next_node[ego_id].append(dis_next_node)
+
+        next_node[ego_id] = [1, 0]
+        dis_next_node = 1 - normalized_position_x
         next_node[ego_id].append(dis_next_node)
         # ############################## 周车信息 ############################## 18
         # 提取surrounding的信息 -12
@@ -601,7 +613,7 @@ def compute_base_ego_vehicle_features(
         cav_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed, normalized_acceleration,
                              normalized_heading]
         ego_stats[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed, normalized_acceleration,
-                             normalized_heading] + road_id_one_hot
+                             normalized_heading]  # + road_id_one_hot
         # global_cav[ego_id] = [normalized_position_x, normalized_position_y, normalized_speed]
     # convert to 2D array (5 * 5)
     cav_stats = np.array(list(cav_stats.values()))
@@ -614,7 +626,7 @@ def compute_base_ego_vehicle_features(
     if len(ego_stats) != len(ego_ids):
         for ego_id in ego_ids:
             if ego_id not in ego_stats:
-                ego_stats[ego_id] = [0.0] * 9
+                ego_stats[ego_id] = [0.0] * 5
 
     # ############################## lane_statistics 的信息 ############################## 18
     # Initialize a list to hold all lane statistics
@@ -622,33 +634,32 @@ def compute_base_ego_vehicle_features(
     all_lane_state_simple = {}
 
     # Iterate over all possible lanes to get their statistics
-    for lane_id, lane_info in lane_statistics.items():
-        # - vehicle_count: 当前车道的车辆数 1
-        # - lane_density: 当前车道的车辆密度 1
-        # - lane_length: 这个车道的长度 1
-        # - speeds: 在这个车道上车的速度 1 (mean)
-        # - waiting_times: 一旦车辆开始行驶，等待时间清零 1  (mean)
-        # - accumulated_waiting_times: 车的累积等待时间 1 (mean)--delete
-        # - lane_CAV_penetration: 这个车道上的CAV占比 1
-
-        # all_lane_stats[lane_id] = lane_info[:4] + lane_info[6:7] + lane_info[9:10]
-        lane_info[0] = lane_info[0] / self.lane_max_num_vehs
-        lane_info[2] = lane_info[2] / state_divisors[0]
-        lane_info[3] = lane_info[3] / 20
-        all_lane_stats[lane_id] = lane_info[:4] + lane_info[6:7] + lane_info[16:17]
-    for ego_id, ego_info in ego_statistics.items():
-        # ############################## 自己车的信息 ############################## 13
-        position, speed, acceleration, heading, road_id, lane_index, surroundings, surroundings_expand_4, surroundings_expand_6 = ego_info
-        ego_lane = f'{road_id}_{lane_index}'
-        ego_lane_stats[ego_id] = all_lane_stats[ego_lane]
-
-    # convert to 2D array (18 * 6)
-    all_lane_stats = np.array(list(all_lane_stats.values()))
+    # for lane_id, lane_info in lane_statistics.items():
+    #     # - vehicle_count: 当前车道的车辆数 1
+    #     # - lane_density: 当前车道的车辆密度 1
+    #     # - lane_length: 这个车道的长度 1
+    #     # - speeds: 在这个车道上车的速度 1 (mean)
+    #     # - waiting_times: 一旦车辆开始行驶，等待时间清零 1  (mean)
+    #     # - accumulated_waiting_times: 车的累积等待时间 1 (mean)--delete
+    #     # - lane_CAV_penetration: 这个车道上的CAV占比 1
+    #
+    #     # all_lane_stats[lane_id] = lane_info[:4] + lane_info[6:7] + lane_info[9:10]
+    #     lane_info[0] = lane_info[0] / self.lane_max_num_vehs
+    #     lane_info[2] = lane_info[2] / state_divisors[0]
+    #     lane_info[3] = lane_info[3] / 20
+    #     all_lane_stats[lane_id] = lane_info[:4] + lane_info[6:7] + lane_info[16:17]
+    # for ego_id, ego_info in ego_statistics.items():
+    #     # ############################## 自己车的信息 ############################## 13
+    #     position, speed, acceleration, heading, road_id, lane_index, surroundings, surroundings_expand_4, surroundings_expand_6 = ego_info
+    #     ego_lane = f'{road_id}_{lane_index}'
+    #     ego_lane_stats[ego_id] = all_lane_stats[ego_lane]
+    #
+    # # convert to 2D array (18 * 6)
+    # all_lane_stats = np.array(list(all_lane_stats.values()))
 
     feature_vector = {}
-    # feature_vector['road_structure'] = np.array([0, 0, bottle_neck_position_x, bottle_neck_position_y, 4,
-    #                                              bottle_neck_position_x, bottle_neck_position_y, 1, 0, 2])
-    feature_vector['road_structure'] = np.array([0, 0, 1, 0, 1, 1, 0, 1])
+    # feature_vector['road_structure'] = np.array([0, 0, 1, 0, 1, 1, 0, 1])
+    feature_vector['road_structure'] = np.array([1, 0])
     # A function to flatten a dictionary structure into 1D array
     def flatten_to_1d(data_dict):
         flat_list = []
@@ -670,11 +681,11 @@ def compute_base_ego_vehicle_features(
         if len(flat_surround_vehs[ego_id]) < 12:
             flat_surround_vehs[ego_id] += [0] * (12 - len(flat_surround_vehs[ego_id]))
         feature_vectors_current[ego_id]['surround_vehs_stats'] = flat_surround_vehs[ego_id]
-        feature_vectors_current[ego_id]['ego_lane_stats'] = ego_lane_stats[ego_id]
+        # feature_vectors_current[ego_id]['ego_lane_stats'] = ego_lane_stats[ego_id]
 
         shared_feature_vectors_current[ego_id] = feature_vector.copy()
         shared_feature_vectors_current[ego_id]['cav_stats'] = cav_stats
-        shared_feature_vectors_current[ego_id]['lane_stats'] = all_lane_stats
+        # shared_feature_vectors_current[ego_id]['lane_stats'] = all_lane_stats
 
     # Flatten the dictionary structure
     # feature_vectors_current_flatten = {ego_id: flatten_to_1d(feature_vector) for ego_id, feature_vector in
@@ -793,7 +804,7 @@ def compute_hierarchical_ego_vehicle_features(
 
     def initialize_missing_data(vehicle_stats, vehicle_hist, max_num_vehicles, hist_length, prefix):
         """初始化缺失的车辆数据"""
-        default_stats = [0.0] * 9  # Precompute the default stats list once
+        default_stats = [0.0] * 5  # Precompute the default stats list once
         # default_hist = [0.0] * (5 * hist_length)  # Precompute the default history list once
 
         for i in range(max_num_vehicles):
@@ -813,10 +824,10 @@ def compute_hierarchical_ego_vehicle_features(
         normalized_info = normalize_vehicle_info(position, speed, acceleration, heading, state_divisors)
 
         # One-hot encode road_id
-        road_id_one_hot = one_hot_encode(road_id, unique_edges)
+        # road_id_one_hot = one_hot_encode(road_id, unique_edges)
 
         # Save HDV state
-        hdv_stats[hdv_id] = normalized_info + road_id_one_hot
+        hdv_stats[hdv_id] = normalized_info  # + road_id_one_hot
 
         # Initialize HDV history data and process it
         hdv_hist[hdv_id] = []
@@ -843,10 +854,10 @@ def compute_hierarchical_ego_vehicle_features(
 
         # Normalize vehicle information
         normalized_info = normalize_vehicle_info(position, speed, acceleration, heading, state_divisors)
-        road_id_one_hot = one_hot_encode(road_id, unique_edges)
+        # road_id_one_hot = one_hot_encode(road_id, unique_edges)
 
         # Store normalized CAV state
-        cav_stats[ego_id] = normalized_info + road_id_one_hot
+        cav_stats[ego_id] = normalized_info  # + road_id_one_hot
 
         # Calculate the last action (handle empty list with fallback)
         last_action = zero_action
@@ -856,7 +867,7 @@ def compute_hierarchical_ego_vehicle_features(
         ego_last_action = [last_action[0] / state_divisors[5], last_action[1] / state_divisors[6]]
 
         # Combine all stats for the ego vehicle
-        ego_stats[ego_id] = normalized_info + road_id_one_hot + ego_last_action
+        ego_stats[ego_id] = normalized_info + ego_last_action  # + road_id_one_hot
 
         # Process vehicle history
         cav_hist[ego_id] = []
@@ -865,22 +876,25 @@ def compute_hierarchical_ego_vehicle_features(
             self.vehicles_hist, self.hist_length, self.use_hist_info
         )
         # Determine the next node and compute distance
-        if position_y < 5 and 90 <= heading < 180:
-            node_key = 'J1'
-            dis_next_node = 1 - normalized_info[0]
-        elif position_x > 95 and 0 <= heading <= 90:
-            node_key = 'J2'
-            dis_next_node = 1 - normalized_info[1]
-        elif position_y > 95 and 270 <= heading < 360:
-            node_key = 'J3'
-            dis_next_node = normalized_info[0]
-        else:
-            node_key = 'J0'
-            dis_next_node = normalized_info[1]
+        # if position_y < 5 and 90 <= heading < 180:
+        #     node_key = 'J1'
+        #     dis_next_node = 1 - normalized_info[0]
+        # elif position_x > 95 and 0 <= heading <= 90:
+        #     node_key = 'J2'
+        #     dis_next_node = 1 - normalized_info[1]
+        # elif position_y > 95 and 270 <= heading < 360:
+        #     node_key = 'J3'
+        #     dis_next_node = normalized_info[0]
+        # else:
+        #     node_key = 'J0'
+        #     dis_next_node = normalized_info[1]
+        #
+        # next_node_pos = [node_positions[node_key][0] / state_divisors[0],
+        #                  node_positions[node_key][1] / state_divisors[1]]
+        # next_node[ego_id] = next_node_pos + [dis_next_node]
 
-        next_node_pos = [node_positions[node_key][0] / state_divisors[0],
-                         node_positions[node_key][1] / state_divisors[1]]
-        next_node[ego_id] = next_node_pos + [dis_next_node]
+        next_node_pos = [1, 0]
+        next_node[ego_id] = next_node_pos + [1 - normalized_info[0]]
 
     # Initialize missing CAV data
     initialize_missing_data(cav_stats, cav_hist, self.max_num_CAVs, self.hist_length, 'CAV')
@@ -980,7 +994,7 @@ def compute_hierarchical_ego_vehicle_features(
 
     if len(ego_stats) != len(ego_ids):
         # Precompute the default list once
-        default_ego_stats = [0.0] * 11
+        default_ego_stats = [0.0] * 7   # 11
 
         # Use setdefault to add missing ego_ids with the default value
         for ego_id in ego_ids:
@@ -1053,12 +1067,12 @@ def compute_hierarchical_ego_vehicle_features(
         return ego_lane_stats, next_lane_stats
 
     # 执行主流程
-    all_lane_stats, all_lane_distribution = process_lane_info(lane_statistics, self.lane_max_num_vehs, state_divisors)
-    ego_lane_stats, next_lane_stats = process_ego_info(ego_statistics, all_lane_stats)
+    # all_lane_stats, all_lane_distribution = process_lane_info(lane_statistics, self.lane_max_num_vehs, state_divisors)
+    # ego_lane_stats, next_lane_stats = process_ego_info(ego_statistics, all_lane_stats)
 
     # Efficiently convert to arrays without unnecessary flattening
-    all_lane_stats = np.array(flatten_list(list(all_lane_stats.values())))
-    all_lane_distribution = np.array(flatten_list(list(all_lane_distribution.values())))
+    # all_lane_stats = np.array(flatten_list(list(all_lane_stats.values())))
+    # all_lane_distribution = np.array(flatten_list(list(all_lane_distribution.values())))
     # end = time.time()
     # print(f'hdv+cav+surround+lane time: {end - start}')
 
@@ -1072,7 +1086,8 @@ def compute_hierarchical_ego_vehicle_features(
         return flat
 
     # 定义 feature_vector
-    feature_vector = {'road_structure': np.array([0, 0, 1, 0, 1, 1, 0, 1])}
+    # feature_vector = {'road_structure': np.array([0, 0, 1, 0, 1, 1, 0, 1])}
+    feature_vector = {'road_structure': np.array([1, 0])}
 
     # 初始化字典
     feature_vectors_current = {}
@@ -1111,8 +1126,8 @@ def compute_hierarchical_ego_vehicle_features(
         fv_current['surround_6_vehs_stats'] = surround_6_padded
 
         # 分配车道统计信息
-        fv_current['ego_lane_stats'] = flatten_list(ego_lane_stats[ego_id])
-        fv_current['next_lane_stats'] = flatten_list(next_lane_stats[ego_id])
+        # fv_current['ego_lane_stats'] = flatten_list(ego_lane_stats[ego_id])
+        # fv_current['next_lane_stats'] = flatten_list(next_lane_stats[ego_id])
 
         # 将当前 ego_id 的 feature_vector 存入 feature_vectors_current
         feature_vectors_current[ego_id] = fv_current
@@ -1121,8 +1136,8 @@ def compute_hierarchical_ego_vehicle_features(
         shared_fv_current = feature_vector.copy()
         shared_fv_current['hdv_stats'] = hdv_stats_array
         shared_fv_current['cav_stats'] = cav_stats_array
-        shared_fv_current['lane_stats'] = all_lane_stats
-        shared_fv_current['lane_distribution'] = all_lane_distribution
+        # shared_fv_current['lane_stats'] = all_lane_stats
+        # shared_fv_current['lane_distribution'] = all_lane_distribution
 
         # 将共享特征存入 shared_feature_vectors_current
         shared_feature_vectors_current[ego_id] = shared_fv_current

@@ -9,7 +9,7 @@ import math
 import csv
 import os
 
-from .generate_scene import generate_scenario
+from .generate_scene_straight import generate_scenario
 from .wrapper_utils import (
     analyze_traffic,
     compute_ego_vehicle_features,
@@ -88,7 +88,7 @@ class VehEnvWrapper(gym.Wrapper):
         self.hist_length = hist_length
 
         self.ego_ids = [f'CAV_{i}' for i in range(self.num_CAVs)]
-        self.veh_ids = self.ego_ids + [f'HDV_{i}' for i in range(self.num_HDVs)]
+        self.veh_ids = self.ego_ids + [f'HDV_{i}' for i in range(self.num_HDVs)] + ['Leader']
 
         # 记录当前速度
         self.current_speed = {key: 0 for key in self.ego_ids}
@@ -121,18 +121,18 @@ class VehEnvWrapper(gym.Wrapper):
         # )
         self.rewards_writer = list()
         if self.strategy == 'base':
-            # road_structure: four nodes' positions - 4*2
+            # road_structure: four nodes' positions - 4*2 (Ring road) / one node position - 2 (Straight road)
             # next_node_pos: pos_x, pos_y , dist_next_node - 3
-            # self_stats: type, pos_x, pos_y, speed, acceleration, heading, lane_one_hot - 10
+            # self_stats: type, pos_x, pos_y, speed, acceleration, heading, (lane_one_hot) - 6/10
             # vehicles_state (front + rear): type, pos_x, pos_y, speed, acceleration, heading - 2*6
             # ego_lane_statistics: num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 6
-            self.self_obs_size = 8 + 3 + 10 + 2 * 6 + 6
-            # road_structure: four nodes' positions - 4*2
+            self.self_obs_size = 2 + 3 + 6 + 2 * 6  # + 6 (straight lane)
+            # road_structure: four nodes' positions - 4*2 (Ring road) / one node position - 2 (Straight road)
             # all_CAVs_state: pos_x, pos_y, speed, acceleration, heading - max_num_CAVs*5
             # all_lane_statistics: num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 4*6
-            self.shared_obs_size = 4 * 2 + self.max_num_CAVs * 5 + 4 * 6
+            self.shared_obs_size = 2 + self.max_num_CAVs * 5  # + 4 * 6 (Straight road)
         elif self.strategy == 'iMARL':
-            # road_structure: four nodes' positions - 4*2
+            # road_structure: four nodes' positions - 4*2 (Ring road) / one node position - 2 (Straight road)
             # next_node_pos: pos_x, pos_y , dist_next_node - 3
             # self_stats: pos_x, pos_y, speed, acceleration, heading, lane_one_hot, last_actor_action - 12 + 2
             # self_hist: pos_x, pos_y, speed, acceleration, heading - 1+5*self.hist_length
@@ -141,17 +141,17 @@ class VehEnvWrapper(gym.Wrapper):
             # vehicles_6_state (3 front + 3 rear): type, pos_x, pos_y, speed, acceleration, heading - 6*(1+5*self.hist_length)
             # ego_lane_statistics: start, end, num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 10
             # next_lane_statistics: start, end, num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 10
-            self.self_obs_size = (8 + 3 + 12 + (1+5*self.hist_length)
+            self.self_obs_size = (2 + 3 + 8 + (1+5*self.hist_length)
                                   + (2 * (1+5*self.hist_length))
                                   + (4 * (1+5*self.hist_length))
-                                  + (6 * (1 + 5 * self.hist_length))
-                                  + 2 * 10)
-            # road_structure: four nodes' positions - 4*2
+                                  + (6 * (1 + 5 * self.hist_length)))
+                                  # + 2 * 10)
+            # road_structure: four nodes' positions - 4*2 (Ring road) / one node position - 2 (Straight road)
             # all_HDVs_state: pos_x, pos_y, speed, acceleration, heading - max_num_HDVs*9
             # all_CAVs_state: pos_x, pos_y, speed, acceleration, heading - max_num_CAVs*5
             # all_lane_statistics - start, end, num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 4*10
             # all_lane_distribution: each lane-veh_info: type, pos_x, pos_y, speed, acceleration, heading - 4 * (max_num_vehs_lane) *6
-            self.shared_obs_size = 8 + self.max_num_HDVs*9 + self.max_num_CAVs*9 + 4*10 + 4 * self.lane_max_num_vehs * 6
+            self.shared_obs_size = 2 + (self.max_num_HDVs + 1)*5 + self.max_num_CAVs*5  # + 4*10 + 4 * self.lane_max_num_vehs * 6
         self.vehicles_hist = {}
         # self.lanes_hist = {}
         if self.use_hist_info:
@@ -181,9 +181,9 @@ class VehEnvWrapper(gym.Wrapper):
     # #####################
     @property
     def action_space(self):
-        """直接控制 ego vehicle 的速度
-        """
-        return {_ego_id: gym.spaces.Discrete(7) for _ego_id in self.ego_ids}
+        """定义连续的动作空间，加速度范围为 [-3, 3]"""
+        return {_ego_id: gym.spaces.Box(low=np.array([-3.0]), high=np.array([3.0]), dtype=np.float32) for _ego_id in
+                self.ego_ids}
 
     @property
     def observation_space(self):
@@ -245,54 +245,58 @@ class VehEnvWrapper(gym.Wrapper):
                     else:
                         # 相对速度 - ego车的速度 - 前车的速度的差值
                         relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(front_vehicle[0])
-                        long_dist = front_vehicle[1] + 1.0
+                        long_dist = traci.vehicle.getPosition(front_vehicle[0])[0] - traci.vehicle.getPosition(vehicle_id)[0] - 5
+                        DRAC = relative_speed ** 2 / long_dist if relative_speed > 0 else 0
                         veh_accel = traci.vehicle.getAcceleration(front_vehicle[0])
                         veh_heading = traci.vehicle.getAngle(front_vehicle[0])
-                        if front_vehicle[0][:3] == 'HDV':
+                        if front_vehicle[0][:3] == 'HDV' or front_vehicle[0] == 'Leader':
                             veh_type = 0
                         else:
                             veh_type = 1
-                        surrounding_vehicle['front'] = (front_vehicle[0], veh_type, long_dist, 0, relative_speed, veh_accel, veh_heading)
-                        sorrounding_vehicle_expand_4['front'] = (front_vehicle[0], veh_type, long_dist, 0, relative_speed, veh_accel, veh_heading)
-                        surrounding_vehicle_expand_6['front'] = (front_vehicle[0], veh_type, long_dist, 0, relative_speed, veh_accel, veh_heading)
+                        surrounding_vehicle['front'] = (front_vehicle[0], veh_type, long_dist, 0, relative_speed, veh_accel, veh_heading, DRAC)
+                        sorrounding_vehicle_expand_4['front'] = (front_vehicle[0], veh_type, long_dist, 0, relative_speed, veh_accel, veh_heading, DRAC)
+                        surrounding_vehicle_expand_6['front'] = (front_vehicle[0], veh_type, long_dist, 0, relative_speed, veh_accel, veh_heading, DRAC)
                         front_vehicle_expand = traci.vehicle.getLeader(front_vehicle[0])
                         if front_vehicle_expand not in [None, ()] and front_vehicle_expand[0] != '':
                             relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(front_vehicle_expand[0])
+                            long_dist = traci.vehicle.getPosition(front_vehicle_expand[0])[0] - traci.vehicle.getPosition(vehicle_id)[0] - 5
+                            DRAC = relative_speed ** 2 / long_dist if relative_speed > 0 else 0
                             expand_veh_accel = traci.vehicle.getAcceleration(front_vehicle_expand[0])
                             expand_veh_heading = traci.vehicle.getAngle(front_vehicle_expand[0])
-                            if front_vehicle_expand[0][:3] == 'HDV':
+                            if front_vehicle_expand[0][:3] == 'HDV' or front_vehicle[0] == 'Leader':
                                 expand_veh_type = 0
                             else:
                                 expand_veh_type = 1
                             # traci得到的距离是ego到前车尾部减去minGap的距离，所以要加上minGap（此时后车是ego）
-                            if front_vehicle[0][:3] == 'HDV':
-                                long_dist = long_dist + front_vehicle_expand[1] + 1.5
-                            elif front_vehicle[0][:3] == 'CAV':
-                                long_dist = long_dist + front_vehicle_expand[1] + 1.0
-
-                            else:
-                                raise ValueError('Unknown vehicle type')
+                            # if front_vehicle[0][:3] == 'HDV' or front_vehicle[0] == 'Leader':
+                            #     long_dist = long_dist + front_vehicle_expand[1] + 1.5
+                            # elif front_vehicle[0][:3] == 'CAV':
+                            #     long_dist = long_dist + front_vehicle_expand[1] + 1.0
+                            # else:
+                            #     raise ValueError('Unknown vehicle type')
                             sorrounding_vehicle_expand_4['front_expand_0'] = (front_vehicle_expand[0], expand_veh_type, long_dist,
-                                                                            0, relative_speed, expand_veh_accel, expand_veh_heading)
+                                                                            0, relative_speed, expand_veh_accel, expand_veh_heading, DRAC)
                             surrounding_vehicle_expand_6['front_expand_0'] = (front_vehicle_expand[0], expand_veh_type, long_dist,
-                                                                            0, relative_speed, expand_veh_accel, expand_veh_heading)
+                                                                            0, relative_speed, expand_veh_accel, expand_veh_heading, DRAC)
                             front_vehicle_expand_exp = traci.vehicle.getLeader(front_vehicle_expand[0])
                             if front_vehicle_expand_exp not in [None, ()] and front_vehicle_expand_exp[0] != '':
                                 relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(front_vehicle_expand_exp[0])
+                                long_dist = traci.vehicle.getPosition(front_vehicle_expand_exp[0])[0] - traci.vehicle.getPosition(vehicle_id)[0] - 5
+                                DRAC = relative_speed ** 2 / long_dist if relative_speed > 0 else 0
                                 expand_veh_accel = traci.vehicle.getAcceleration(front_vehicle_expand_exp[0])
                                 expand_veh_heading = traci.vehicle.getAngle(front_vehicle_expand_exp[0])
-                                if front_vehicle_expand_exp[0][:3] == 'HDV':
+                                if front_vehicle_expand_exp[0][:3] == 'HDV' or front_vehicle[0] == 'Leader':
                                     expand_veh_type = 0
                                 else:
                                     expand_veh_type = 1
-                                if front_vehicle_expand[0][:3] == 'HDV':
-                                    long_dist = long_dist + front_vehicle_expand_exp[1] + 1.5
-                                elif front_vehicle_expand[0][:3] == 'CAV':
-                                    long_dist = long_dist + front_vehicle_expand_exp[1] + 1.0
-                                else:
-                                    raise ValueError('Unknown vehicle type')
+                                # if front_vehicle_expand[0][:3] == 'HDV' or front_vehicle[0] == 'Leader':
+                                #     long_dist = long_dist + front_vehicle_expand_exp[1] + 1.5
+                                # elif front_vehicle_expand[0][:3] == 'CAV':
+                                #     long_dist = long_dist + front_vehicle_expand_exp[1] + 1.0
+                                # else:
+                                #     raise ValueError('Unknown vehicle type')
                                 surrounding_vehicle_expand_6['front_expand_1'] = (front_vehicle_expand_exp[0], expand_veh_type, long_dist,
-                                                                                  0, relative_speed, expand_veh_accel, expand_veh_heading)
+                                                                                  0, relative_speed, expand_veh_accel, expand_veh_heading, DRAC)
 
                 # 在当前车道上的后车
                 back_vehicle = traci.vehicle.getFollower(vehicle_id)
@@ -311,51 +315,57 @@ class VehEnvWrapper(gym.Wrapper):
                     else:
                         # 相对速度 - ego车的速度 - 后车的速度的差值
                         relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(back_vehicle[0])
+                        long_dist = traci.vehicle.getPosition(vehicle_id)[0] - traci.vehicle.getPosition(back_vehicle[0])[0] - 5
+                        DRAC = relative_speed ** 2 / long_dist if relative_speed < 0 else 0
                         veh_accel = traci.vehicle.getAcceleration(back_vehicle[0])
                         veh_heading = traci.vehicle.getAngle(back_vehicle[0])
-                        if back_vehicle[0][:3] == 'HDV':
+                        if back_vehicle[0][:3] == 'HDV' or front_vehicle[0] == 'Leader':
                             veh_type = 0
-                            long_dist = back_vehicle[1] + 1.5
+                            # long_dist = back_vehicle[1] + 1.5
                         elif back_vehicle[0][:3] == 'CAV':
                             veh_type = 1
-                            long_dist = back_vehicle[1] + 1.0
+                            # long_dist = back_vehicle[1] + 1.0
                         else:
                             raise ValueError('Unknown vehicle type')
-                        surrounding_vehicle['back'] = (back_vehicle[0], veh_type, -(long_dist), 0, relative_speed, veh_accel, veh_heading)
-                        sorrounding_vehicle_expand_4['back'] = (back_vehicle[0], veh_type, -(long_dist), 0, relative_speed, veh_accel, veh_heading)
-                        surrounding_vehicle_expand_6['back'] = (back_vehicle[0], veh_type, -(long_dist), 0, relative_speed, veh_accel, veh_heading)
+                        surrounding_vehicle['back'] = (back_vehicle[0], veh_type, -(long_dist), 0, relative_speed, veh_accel, veh_heading, DRAC)
+                        sorrounding_vehicle_expand_4['back'] = (back_vehicle[0], veh_type, -(long_dist), 0, relative_speed, veh_accel, veh_heading, DRAC)
+                        surrounding_vehicle_expand_6['back'] = (back_vehicle[0], veh_type, -(long_dist), 0, relative_speed, veh_accel, veh_heading, DRAC)
                         back_vehicle_expand = traci.vehicle.getFollower(back_vehicle[0])
                         if back_vehicle_expand not in [None, ()] and back_vehicle_expand[0] != '':
                             expand_veh_accel = traci.vehicle.getAcceleration(back_vehicle_expand[0])
                             expand_veh_heading = traci.vehicle.getAngle(back_vehicle_expand[0])
                             relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(back_vehicle_expand[0])
-                            if back_vehicle_expand[0][:3] == 'HDV':
+                            long_dist = traci.vehicle.getPosition(vehicle_id)[0] - traci.vehicle.getPosition(back_vehicle_expand[0])[0] - 5
+                            DRAC = relative_speed ** 2 / long_dist if relative_speed < 0 else 0
+                            if back_vehicle_expand[0][:3] == 'HDV' or front_vehicle[0] == 'Leader':
                                 expand_veh_type = 0
-                                long_dist = long_dist + back_vehicle_expand[1] + 1.5
+                                # long_dist = long_dist + back_vehicle_expand[1] + 1.5
                             elif back_vehicle_expand[0][:3] == 'CAV':
                                 expand_veh_type = 1
-                                long_dist = long_dist + back_vehicle_expand[1] + 1.0
+                                # long_dist = long_dist + back_vehicle_expand[1] + 1.0
                             else:
                                 raise ValueError('Unknown vehicle type')
                             sorrounding_vehicle_expand_4['back_expand_0'] = (back_vehicle_expand[0], expand_veh_type, -(long_dist),
-                                                                        0, relative_speed, expand_veh_accel, expand_veh_heading)
+                                                                        0, relative_speed, expand_veh_accel, expand_veh_heading, DRAC)
                             surrounding_vehicle_expand_6['back_expand_0'] = (back_vehicle_expand[0], expand_veh_type, -(long_dist),
-                                                                        0, relative_speed, expand_veh_accel, expand_veh_heading)
+                                                                        0, relative_speed, expand_veh_accel, expand_veh_heading, DRAC)
                             back_vehicle_expand_exp = traci.vehicle.getFollower(back_vehicle_expand[0])
                             if back_vehicle_expand_exp not in [None, ()] and back_vehicle_expand_exp[0] != '':
                                 expand_veh_accel = traci.vehicle.getAcceleration(back_vehicle_expand_exp[0])
                                 expand_veh_heading = traci.vehicle.getAngle(back_vehicle_expand_exp[0])
                                 relative_speed = traci.vehicle.getSpeed(vehicle_id) - traci.vehicle.getSpeed(back_vehicle_expand_exp[0])
-                                if back_vehicle_expand_exp[0][:3] == 'HDV':
+                                long_dist = traci.vehicle.getPosition(vehicle_id)[0] - traci.vehicle.getPosition(back_vehicle_expand_exp[0])[0] - 5
+                                DRAC = relative_speed ** 2 / long_dist if relative_speed < 0 else 0
+                                if back_vehicle_expand_exp[0][:3] == 'HDV' or front_vehicle[0] == 'Leader':
                                     expand_veh_type = 0
-                                    long_dist = long_dist + back_vehicle_expand_exp[1] + 1.5
+                                    # long_dist = long_dist + back_vehicle_expand_exp[1] + 1.5
                                 elif back_vehicle_expand_exp[0][:3] == 'CAV':
                                     expand_veh_type = 1
-                                    long_dist = long_dist + back_vehicle_expand_exp[1] + 1.0
+                                    # long_dist = long_dist + back_vehicle_expand_exp[1] + 1.0
                                 else:
                                     raise ValueError('Unknown vehicle type')
                                 surrounding_vehicle_expand_6['back_expand_1'] = (back_vehicle_expand_exp[0], expand_veh_type, -(long_dist),
-                                                                          0, relative_speed, expand_veh_accel, expand_veh_heading)
+                                                                          0, relative_speed, expand_veh_accel, expand_veh_heading, DRAC)
 
                 surrounding_vehicles[vehicle_id] = surrounding_vehicle
                 sorrounding_vehicles_expand_4[vehicle_id] = sorrounding_vehicle_expand_4
@@ -390,20 +400,24 @@ class VehEnvWrapper(gym.Wrapper):
             for surround_key in self.required_surroundings:
                 if surround_key not in self.surround_vehicle[vehicle_id]:
                     self.surround_vehicle[vehicle_id][surround_key] = 0
+        leader_speed = np.sin(self.total_timesteps / 5) * 3 + 10
+        self.actions['Leader'] = (0, leader_speed)
 
         for _veh_id in raw_action:
             if _veh_id in self.actions:  # 只更新 ego vehicle 的速度
                 # 不换掉，只需要更新速度
-                if raw_action[_veh_id] in range(0, 7):
-                    speed_command = min(20, max(0, self.current_speed[_veh_id]+self.action_pointer[raw_action[_veh_id]]))
-                    # if speed_command <= 0:
-                    #     print('debug')
-                    self.action_command = (0, speed_command)
-                else:
-                    raise ValueError(f'Action {raw_action[_veh_id]} is not in the range of 0-6')
-                self.actions[_veh_id] = self.action_command
+                speed_command = min(20, max(0, self.current_speed[_veh_id] + raw_action[_veh_id]))
+                self.actions[_veh_id] = (0, speed_command)
+                # if raw_action[_veh_id] in range(0, 7):
+                #     speed_command = min(20, max(0, self.current_speed[_veh_id]+self.action_pointer[raw_action[_veh_id]]))
+                #     # if speed_command <= 0:
+                #     #     print('debug')
+                #     self.action_command = (0, speed_command)
+                # else:
+                #     raise ValueError(f'Action {raw_action[_veh_id]} is not in the range of 0-6')
+                # self.actions[_veh_id] = self.action_command
 
-                self.actor_action[_veh_id].append([raw_action[_veh_id], self.action_command[1]])
+                self.actor_action[_veh_id].append([raw_action[_veh_id], speed_command])
 
                 # self.safety_before[_veh_id] = self.safety_assessment(_veh_id, self.action_command)
                 # self.actions[_veh_id] = self.lower_controller(_veh_id, self.action_command, 2)
@@ -818,8 +832,8 @@ class VehEnvWrapper(gym.Wrapper):
                 individual_speed_r_simple = (-abs(speed - max_speed) / max_speed * 5 + 5) * 1
                 inidividual_rew_ego[veh_id] += individual_speed_r_simple
                 # CAV车辆的加速度绝对值越小，reward越高 - [0, 6]
-                individual_acceleration_r = (-abs(acceleration) + 6) * 0.5
-                inidividual_rew_ego[veh_id] += individual_acceleration_r
+                # individual_acceleration_r = (-abs(acceleration) + 6) * 0.5
+                # inidividual_rew_ego[veh_id] += individual_acceleration_r
 
                 # # CAV车辆的等待时间越短，reward越高 - (-infty,0]
                 # individual_accumulated_waiting_time_r = -accumulated_waiting_time
@@ -876,7 +890,7 @@ class VehEnvWrapper(gym.Wrapper):
         # global_all_waiting_time_r = -all_vehicle_waiting_time   # (-infty,0]
 
 
-        time_penalty = 0
+        time_penalty = -1
 
         # TODO： lane_statistics  在E2的等待时间
         # TODO: 完成时间越短，reward越高 - [0, 5]

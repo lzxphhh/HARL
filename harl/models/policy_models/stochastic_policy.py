@@ -46,12 +46,12 @@ class StochasticPolicy(nn.Module):
         # 根据观测空间的形状，选择CNN或者MLP作为基础网络，用于base提取特征，输入大小obs_shape，输出大小hidden_sizes[-1]
         base = CNNBase if len(obs_shape) == 3 else MLPBase
         self.base = base(args, obs_shape)
-        self.attention = Encoder(obs_shape[0], action_space.n, 1, self.hidden_sizes[-1], 4, 'Discrete')
-        self.hierarchical = Hierarchical_state_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
-        self.tie_rep = TIE_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
+        # self.attention = Encoder(obs_shape[0], action_space.n, 1, self.hidden_sizes[-1], 4, 'Discrete')
+        # self.hierarchical = Hierarchical_state_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
+        # self.tie_rep = TIE_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
         # self.prediction = Prediction_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
-        self.cross_aware = Cross_aware_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
-        self.MARL_CACC = CACC_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
+        # self.cross_aware = Cross_aware_rep(obs_shape[0], action_space.n, self.hidden_sizes[-1], 'Discrete', args)
+        self.MARL_CACC = CACC_rep(obs_shape[0], action_space.shape[0], self.hidden_sizes[-1], 'Continuous', args)
         self.num_CAVs = args['num_CAVs']
         self.num_HDVs = args['num_HDVs']
         self.CAV_ids = [f'CAV_{i}' for i in range(self.num_CAVs)]
@@ -121,18 +121,21 @@ class StochasticPolicy(nn.Module):
         # start = time.time()
         if self.strategy == 'base':
             actor_features = self.base(obs)
-        elif self.strategy == 'attention':
-            actor_features = self.attention(obs)
-        elif self.strategy == 'hierarchical':
-            actor_features = self.hierarchical(obs, batch_size=obs.size(0))
-        # elif self.strategy == 'prediction':
+        # elif self.strategy == 'attention':
+        #     actor_features = self.attention(obs)
+        # elif self.strategy == 'hierarchical':
+        #     actor_features = self.hierarchical(obs, batch_size=obs.size(0))
+        # # elif self.strategy == 'prediction':
+        # #     actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
+        # elif self.strategy == 'cross_aware':
+        #     actor_features = self.cross_aware(obs, batch_size=obs.size(0))
+        # elif self.strategy == 'DIACC':
         #     actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
-        elif self.strategy == 'cross_aware':
-            actor_features = self.cross_aware(obs, batch_size=obs.size(0))
-        elif self.strategy == 'DIACC':
-            actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
         elif self.strategy == 'iMARL':
-            actor_features, reconstruct_info = self.MARL_CACC(obs, batch_size=obs.size(0))
+            # start = time.time()
+            actor_features = self.MARL_CACC(obs, batch_size=obs.size(0))
+            # end = time.time()
+            # print(f'Actor forward time: {end - start} second')
 
         # end = time.time()
         # print(f'forward time: {end - start} second')
@@ -189,16 +192,16 @@ class StochasticPolicy(nn.Module):
         # actor_features = self.hierarchical(obs, batch_size=obs.size(0))
         if self.strategy == 'base':
             actor_features = self.base(obs)
-        elif self.strategy == 'attention':
-            actor_features = self.attention(obs)
-        elif self.strategy == 'hierarchical':
-            actor_features = self.hierarchical(obs, batch_size=obs.size(0))
-        elif self.strategy == 'cross_aware':
-            actor_features = self.cross_aware(obs, batch_size=obs.size(0))
-        elif self.strategy == 'DIACC':
-            actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
+        # elif self.strategy == 'attention':
+        #     actor_features = self.attention(obs)
+        # elif self.strategy == 'hierarchical':
+        #     actor_features = self.hierarchical(obs, batch_size=obs.size(0))
+        # elif self.strategy == 'cross_aware':
+        #     actor_features = self.cross_aware(obs, batch_size=obs.size(0))
+        # elif self.strategy == 'DIACC':
+        #     actor_features, reconstruct_info = self.tie_rep(obs, batch_size=obs.size(0))
         elif self.strategy == 'iMARL':
-            actor_features, reconstruct_info = self.MARL_CACC(obs, batch_size=obs.size(0))
+            actor_features = self.MARL_CACC(obs, batch_size=obs.size(0))
 
         if self.use_naive_recurrent_policy or self.use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
