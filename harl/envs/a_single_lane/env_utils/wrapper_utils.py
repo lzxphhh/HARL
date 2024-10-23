@@ -15,7 +15,7 @@ LANE_LENGTHS = {
     # 'E3': 100,
 }
 
-state_divisors = np.array([2000, 3, 20, 3, 360, 6, 20])
+state_divisors = np.array([2000, 3, 20, 3, 360, 3, 20])
 # Lane_start = {
 #     'E0': (0, 0),
 #     'E1': (100, 0),
@@ -68,22 +68,30 @@ def analyze_traffic(state, lane_ids, max_veh_num):
     """
 
     # 初始化每一个 lane 的统计信息
-    lane_statistics = {
-        lane_id: {
-            'vehicle_count': 0,  # 当前车道的车辆数
-            'lane_density': 0,  # 当前车道的车辆密度
-            'speeds': [],  # 在这个车道上车的速度
-            'accelerations': [], # 在这个车道上车的加速度
-            'waiting_times': [],  # 一旦车辆开始行驶，等待时间清零
-            'accumulated_waiting_times': [],  # 车的累积等待时间
-            # 'crash_assessment': 0,  # 这个车道碰撞了多少次
-            'lane_length': 0,  # 这个车道的长度
-            'lane_start': (0, 0),  # 这个车道的起点
-            'lane_end': (0, 0),  # 这个车道的终点
-            'lane_num_CAV': 0,  # 这个车道上的CAV数量
-            'lane_CAV_penetration': 0,  # 这个车道上的CAV占比
-            'vehicles_state': [],  # 这个车道上车辆的位置
-        } for lane_id in lane_ids
+    # lane_statistics = {
+    #     lane_id: {
+    #         'vehicle_count': 0,  # 当前车道的车辆数
+    #         'lane_density': 0,  # 当前车道的车辆密度
+    #         'speeds': [],  # 在这个车道上车的速度
+    #         'accelerations': [], # 在这个车道上车的加速度
+    #         'waiting_times': [],  # 一旦车辆开始行驶，等待时间清零
+    #         'accumulated_waiting_times': [],  # 车的累积等待时间
+    #         # 'crash_assessment': 0,  # 这个车道碰撞了多少次
+    #         'lane_length': 0,  # 这个车道的长度
+    #         'lane_start': (0, 0),  # 这个车道的起点
+    #         'lane_end': (0, 0),  # 这个车道的终点
+    #         'lane_num_CAV': 0,  # 这个车道上的CAV数量
+    #         'lane_CAV_penetration': 0,  # 这个车道上的CAV占比
+    #         'vehicles_state': [],  # 这个车道上车辆的位置
+    #     } for lane_id in lane_ids
+    # }
+    lane_stats = {
+        'vehicle_count': 0,  # 当前车道的车辆数
+        'speeds': [],  # 在这个车道上车的速度
+        'accelerations': [],  # 在这个车道上车的加速度
+        'lane_num_CAV': 0,  # 这个车道上的CAV数量
+        'lane_CAV_penetration': 0,  # 这个车道上的CAV占比
+        'vehicles_state': [],  # 这个车道上车辆的位置
     }
     # 初始化 ego vehicle 的统计信息
     ego_statistics = {}
@@ -138,15 +146,15 @@ def analyze_traffic(state, lane_ids, max_veh_num):
         # ego车需要的信息
         if vehicle['vehicle_type'] == 'ego':
             # TODO: when will the state['leader'] be not None?
-            surroundings = vehicle['surround']
-            surroundings_expand_4 = vehicle['surround_expand_4']
-            surroundings_expand_6 = vehicle['surround_expand_6']
+            surroundings_2 = vehicle['surround_2']
+            surroundings_4 = vehicle['surround_4']
+            surroundings_6 = vehicle['surround_6']
 
             ego_statistics[vehicle_id] = [position, speed, acceleration,
                                           heading, road_id, lane_index,
-                                          surroundings,
-                                          surroundings_expand_4,
-                                          surroundings_expand_6
+                                          surroundings_2,
+                                          surroundings_4,
+                                          surroundings_6
                                           ]
         # HDV车需要的信息
         else:
@@ -154,74 +162,113 @@ def analyze_traffic(state, lane_ids, max_veh_num):
                                           heading, road_id, lane_index]
 
         # 根据lane_id把以下信息写进lane_statistics
-        if lane_id in lane_statistics:
-            stats = lane_statistics[lane_id]
-            stats['lane_length'] = LANE_LENGTHS[road_id],  # 这个车道的长度
-            stats['lane_start'] = Lane_start[road_id],  # 这个车道的起点
-            stats['lane_end'] = Lane_end[road_id],  # 这个车道的终点
-            stats['vehicle_count'] += 1
-            if vehicle['vehicle_type'] == 'ego':
-                stats['lane_num_CAV'] += 1
-                vehicle_type = 1
-            else:
-                vehicle_type = 0
-            stats['speeds'].append(vehicle['speed'])
-            stats['accelerations'].append(vehicle['acceleration'])
-            if vehicle['acceleration'] == [] or vehicle['acceleration'] == None:
-                print('acceleration is empty')
-            stats['accumulated_waiting_times'].append(vehicle['accumulated_waiting_time'])
-            stats['waiting_times'].append(vehicle['waiting_time'])
-            stats['lane_density'] = stats['vehicle_count'] / LANE_LENGTHS[road_id]
-            stats['vehicles_state'].append([vehicle_type, vehicle['position'][0]/state_divisors[0], vehicle['position'][1]/state_divisors[1],
-                                            vehicle['speed']/state_divisors[2], vehicle['acceleration']/state_divisors[3], vehicle['heading']/state_divisors[4]])
+        # if lane_id in lane_statistics:
+        #     stats = lane_statistics[lane_id]
+        #     stats['lane_length'] = LANE_LENGTHS[road_id],  # 这个车道的长度
+        #     stats['lane_start'] = Lane_start[road_id],  # 这个车道的起点
+        #     stats['lane_end'] = Lane_end[road_id],  # 这个车道的终点
+        #     stats['vehicle_count'] += 1
+        #     if vehicle['vehicle_type'] == 'ego':
+        #         stats['lane_num_CAV'] += 1
+        #         vehicle_type = 1
+        #     else:
+        #         vehicle_type = 0
+        #     stats['speeds'].append(vehicle['speed'])
+        #     stats['accelerations'].append(vehicle['acceleration'])
+        #     if vehicle['acceleration'] == [] or vehicle['acceleration'] == None:
+        #         print('acceleration is empty')
+        #     stats['accumulated_waiting_times'].append(vehicle['accumulated_waiting_time'])
+        #     stats['waiting_times'].append(vehicle['waiting_time'])
+        #     stats['lane_density'] = stats['vehicle_count'] / LANE_LENGTHS[road_id]
+        #     stats['vehicles_state'].append([vehicle_type, vehicle['position'][0]/state_divisors[0], vehicle['position'][1]/state_divisors[1],
+        #                                     vehicle['speed']/state_divisors[2], vehicle['acceleration']/state_divisors[3], vehicle['heading']/state_divisors[4]])
+
+        lane_stats['vehicle_count'] += 1
+        if vehicle['vehicle_type'] == 'ego':
+            lane_stats['lane_num_CAV'] += 1
+            vehicle_type = 1
+        else:
+            vehicle_type = 0
+        lane_stats['speeds'].append(vehicle['speed'])
+        lane_stats['accelerations'].append(vehicle['acceleration'])
+        if vehicle['acceleration'] == [] or vehicle['acceleration'] == None:
+            print('acceleration is empty')
+        lane_stats['vehicles_state'].append(
+            [vehicle_type, vehicle['position'][0] / state_divisors[0], vehicle['position'][1] / state_divisors[1],
+             vehicle['speed'] / state_divisors[2], vehicle['acceleration'] / state_divisors[3],
+             vehicle['heading'] / state_divisors[4]])
+    speeds = np.array(lane_stats['speeds'])
+    accelerations = np.array(lane_stats['accelerations'])
+    vehicles_state_sorted = sorted(lane_stats['vehicles_state'], key=lambda x: x[1], reverse=True)
+    veh_stats = np.array(vehicles_state_sorted)
+    if len(veh_stats) == 0:
+        vehs_stats = np.zeros((max_veh_num, 6))
+    elif len(veh_stats) < max_veh_num:
+        vehs_stats = np.pad(veh_stats, ((0, max_veh_num - len(veh_stats)), (0, 0)), 'constant', constant_values=0)
+    else:
+        vehs_stats = veh_stats[:max_veh_num]
+    vehicle_count = lane_stats['vehicle_count']
+    lane_num_CAV = lane_stats['lane_num_CAV']
+    lane_CAV_penetration = lane_num_CAV / vehicle_count if vehicle_count > 0 else 0
+    if vehicle_count > 0:  # 当这个车道上有车的时候
+        lane_statistics = [
+            vehicle_count,
+            np.mean(speeds), np.max(speeds), np.min(speeds),
+            np.mean(accelerations), np.max(accelerations), np.min(accelerations),
+            lane_num_CAV, lane_CAV_penetration,
+            vehs_stats
+        ]
+    else:
+        lane_statistics = [0] * 9
+        lane_statistics.append(vehs_stats)
 
     # lane_statistics计算
-    for lane_id, stats in lane_statistics.items():
-        speeds = np.array(stats['speeds'])
-        accelerations = np.array(stats['accelerations'])
-
-        veh_stats = np.array(stats['vehicles_state'])
-        if len(veh_stats) == 0:
-            vehs_stats = np.zeros((max_veh_num, 6))
-        elif len(veh_stats) < max_veh_num:
-            vehs_stats = np.pad(veh_stats, ((0, max_veh_num - len(veh_stats)), (0, 0)), 'constant', constant_values=0)
-        else:
-            vehs_stats = veh_stats[:max_veh_num]
-        # vehs_stats = vehs_stats.flatten()
-
-        waiting_times = np.array(stats['waiting_times'])
-        accumulated_waiting_times = np.array(stats['accumulated_waiting_times'])
-        vehicle_count = stats['vehicle_count']
-        lane_length = stats['lane_length']
-        lane_start = stats['lane_start']
-        lane_end = stats['lane_end']
-        lane_density = stats['lane_density']
-        lane_num_CAV = stats['lane_num_CAV']
-        lane_CAV_penetration = lane_num_CAV / vehicle_count if vehicle_count > 0 else 0
-
-        if vehicle_count > 0:  # 当这个车道上有车的时候
-            lane_statistics[lane_id] = [
-                vehicle_count,
-                lane_density,
-                lane_length[0],
-                np.mean(speeds), np.max(speeds), np.min(speeds),
-                np.mean(accelerations), np.max(accelerations), np.min(accelerations),
-                np.mean(waiting_times), np.max(waiting_times), np.min(waiting_times),
-                np.mean(accumulated_waiting_times), np.max(accumulated_waiting_times), np.min(accumulated_waiting_times),
-                lane_num_CAV, lane_CAV_penetration,
-                lane_start, lane_end,
-                vehs_stats
-            ]
-        else:
-            # lane_statistics[lane_id] = [0] * 12
-            lane_statistics[lane_id] = [0] * 17 # add lane_num_CAV, lane_CAV_penetration
-
-            # 将两个数组添加到列表中
-            lane_statistics[lane_id].append(lane_start)
-            lane_statistics[lane_id].append(lane_end)
-            lane_statistics[lane_id].append(vehs_stats)
-    # lane_statistics转换成dict
-    lane_statistics = {lane_id: stats for lane_id, stats in lane_statistics.items()}
+    # for lane_id, stats in lane_statistics.items():
+    #     speeds = np.array(stats['speeds'])
+    #     accelerations = np.array(stats['accelerations'])
+    #
+    #     veh_stats = np.array(stats['vehicles_state'])
+    #     if len(veh_stats) == 0:
+    #         vehs_stats = np.zeros((max_veh_num, 6))
+    #     elif len(veh_stats) < max_veh_num:
+    #         vehs_stats = np.pad(veh_stats, ((0, max_veh_num - len(veh_stats)), (0, 0)), 'constant', constant_values=0)
+    #     else:
+    #         vehs_stats = veh_stats[:max_veh_num]
+    #     # vehs_stats = vehs_stats.flatten()
+    #
+    #     waiting_times = np.array(stats['waiting_times'])
+    #     accumulated_waiting_times = np.array(stats['accumulated_waiting_times'])
+    #     vehicle_count = stats['vehicle_count']
+    #     lane_length = stats['lane_length']
+    #     lane_start = stats['lane_start']
+    #     lane_end = stats['lane_end']
+    #     lane_density = stats['lane_density']
+    #     lane_num_CAV = stats['lane_num_CAV']
+    #     lane_CAV_penetration = lane_num_CAV / vehicle_count if vehicle_count > 0 else 0
+    #
+    #     if vehicle_count > 0:  # 当这个车道上有车的时候
+    #         lane_statistics[lane_id] = [
+    #             vehicle_count,
+    #             lane_density,
+    #             lane_length[0],
+    #             np.mean(speeds), np.max(speeds), np.min(speeds),
+    #             np.mean(accelerations), np.max(accelerations), np.min(accelerations),
+    #             np.mean(waiting_times), np.max(waiting_times), np.min(waiting_times),
+    #             np.mean(accumulated_waiting_times), np.max(accumulated_waiting_times), np.min(accumulated_waiting_times),
+    #             lane_num_CAV, lane_CAV_penetration,
+    #             lane_start, lane_end,
+    #             vehs_stats
+    #         ]
+    #     else:
+    #         # lane_statistics[lane_id] = [0] * 12
+    #         lane_statistics[lane_id] = [0] * 17 # add lane_num_CAV, lane_CAV_penetration
+    #
+    #         # 将两个数组添加到列表中
+    #         lane_statistics[lane_id].append(lane_start)
+    #         lane_statistics[lane_id].append(lane_end)
+    #         lane_statistics[lane_id].append(vehs_stats)
+    # # lane_statistics转换成dict
+    # lane_statistics = {lane_id: stats for lane_id, stats in lane_statistics.items()}
 
     return lane_statistics, ego_statistics, reward_statistics, hdv_statistics
 
@@ -269,14 +316,14 @@ def check_collisions(vehicles, ego_ids, gap_threshold: float, gap_warn_collision
     filtered_ego_vehicles = filter_vehicles(vehicles, ego_ids)
 
     for ego_key, ego_value in filtered_ego_vehicles.items():
-        for surround_direction, content in filtered_ego_vehicles[ego_key]['surround'].items():
+        for surround_direction, content in filtered_ego_vehicles[ego_key]['surround_2'].items():
             c_info = None
             w_info = None
 
             # print(ego_key, 'is surrounded by:', content[0], 'with direction', surround_direction,
             # 'at distance', content[1])
             # TODO: 同一个车道和不同车道的车辆的warn gap应该是不一样！！！！11
-            distance = math.sqrt(content[1] ** 2 + content[2] ** 2)
+            distance = math.sqrt(content[2] ** 2 + content[3] ** 2)
             # print('distance:', distance)
             if distance < gap_threshold:
                 # print(ego_key, 'collision with', content[0])
@@ -285,7 +332,7 @@ def check_collisions(vehicles, ego_ids, gap_threshold: float, gap_warn_collision
                           'CAV_key': ego_key,
                           'surround_key': content[0],
                           'distance': distance,
-                          'relative_speed': content[3],
+                          'relative_speed': content[4],
                           }
 
             elif gap_threshold <= distance < gap_warn_collision:
@@ -294,7 +341,7 @@ def check_collisions(vehicles, ego_ids, gap_threshold: float, gap_warn_collision
                           'CAV_key': ego_key,
                           'surround_key': content[0],
                           'distance': distance,
-                          'relative_speed': content[3],
+                          'relative_speed': content[4],
                           }
             if c_info:
                 info.append(c_info)
@@ -569,7 +616,7 @@ def compute_base_ego_vehicle_features(
     surround_vehs_stats = {key:[] for key in ego_ids}
     for ego_id, ego_info in ego_statistics.items():
         # ############################## 自己车的信息 ############################## 13
-        position, speed, acceleration, heading, road_id, lane_index, surroundings, surroundings_expand_4, surroundings_expand_6 = ego_info
+        position, speed, acceleration, heading, road_id, lane_index, surroundings_2, surroundings_4, surroundings_6 = ego_info
         # 速度归一化  - 1
         normalized_speed = speed / state_divisors[2]
         # 加速度归一化  - 1
@@ -600,12 +647,12 @@ def compute_base_ego_vehicle_features(
         #     dis_next_node = normalized_position_y
         # next_node[ego_id].append(dis_next_node)
 
-        next_node[ego_id] = [1, 0]
+        next_node[ego_id] = []
         dis_next_node = 1 - normalized_position_x
         next_node[ego_id].append(dis_next_node)
         # ############################## 周车信息 ############################## 18
         # 提取surrounding的信息 -12
-        for index, (_, statistics) in enumerate(surroundings.items()):
+        for index, (_, statistics) in enumerate(surroundings_2.items()):
             veh_type, relat_x, relat_y, relat_v, veh_acc, veh_heading = statistics[1:7]
             surround_vehs_stats[ego_id].append([veh_type, relat_x/state_divisors[0], relat_y/state_divisors[1], relat_v/state_divisors[2],
                                                 veh_acc/state_divisors[3], veh_heading/state_divisors[4]])
@@ -628,7 +675,7 @@ def compute_base_ego_vehicle_features(
             if ego_id not in ego_stats:
                 ego_stats[ego_id] = [0.0] * 5
 
-    # ############################## lane_statistics 的信息 ############################## 18
+    # ############################## lane_statistics 的信息 ##############################
     # Initialize a list to hold all lane statistics
     all_lane_stats = {}
     all_lane_state_simple = {}
@@ -656,6 +703,9 @@ def compute_base_ego_vehicle_features(
     #
     # # convert to 2D array (18 * 6)
     # all_lane_stats = np.array(list(all_lane_stats.values()))
+    flow_stats = [(lane_statistics[0]/self.lane_max_num_vehs), (lane_statistics[1]/state_divisors[2]),
+                  (lane_statistics[4]/state_divisors[3]), (lane_statistics[7]/self.max_num_CAVs),
+                  (lane_statistics[8])]
 
     feature_vector = {}
     # feature_vector['road_structure'] = np.array([0, 0, 1, 0, 1, 1, 0, 1])
@@ -681,10 +731,12 @@ def compute_base_ego_vehicle_features(
         if len(flat_surround_vehs[ego_id]) < 12:
             flat_surround_vehs[ego_id] += [0] * (12 - len(flat_surround_vehs[ego_id]))
         feature_vectors_current[ego_id]['surround_vehs_stats'] = flat_surround_vehs[ego_id]
+        feature_vectors_current[ego_id]['flow_stats'] = flow_stats
         # feature_vectors_current[ego_id]['ego_lane_stats'] = ego_lane_stats[ego_id]
 
         shared_feature_vectors_current[ego_id] = feature_vector.copy()
         shared_feature_vectors_current[ego_id]['cav_stats'] = cav_stats
+        shared_feature_vectors_current[ego_id]['flow_stats'] = flow_stats
         # shared_feature_vectors_current[ego_id]['lane_stats'] = all_lane_stats
 
     # Flatten the dictionary structure

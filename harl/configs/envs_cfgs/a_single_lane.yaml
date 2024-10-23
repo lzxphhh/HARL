@@ -8,13 +8,13 @@ use_gui: False
 
 # for veh wrapper
 scene_name: "Env_SingleLane"
-max_num_CAVs: 20
-max_num_HDVs: 16
+max_num_CAVs: 21
+max_num_HDVs: 17
 num_CAVs: 9  # num_CAVs/penetration_CAV should be an integer multiple of 10, except for penetration_CAV=1
 num_HDVs: 12
-lane_max_num_vehs: 7
+lane_max_num_vehs: 22
 penetration_CAV: 0.4 # only 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1 are valid
-strategy: "iMARL"  # "base" or "iMARL"
+strategy: "base"  # "base" or "iMARL"
 use_hist_info: True
 hist_length: 5
 warmup_steps: 0
