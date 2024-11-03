@@ -143,24 +143,31 @@ class VehEnvWrapper(gym.Wrapper):
             # vehicles_6_state (3 front + 3 rear): type, pos_x, pos_y, speed, acceleration, heading - 6*(1+5*self.hist_length)
             # ego_lane_statistics: start, end, num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 10
             # next_lane_statistics: start, end, num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 10
-            self.self_obs_size = (2 + 3 + 8 + (1+5*self.hist_length)
+            self.self_obs_size = (2 + 1 + 8 + (1+5*self.hist_length)
                                   + (2 * (1+5*self.hist_length))
                                   + (4 * (1+5*self.hist_length))
-                                  + (6 * (1 + 5 * self.hist_length)))
+                                  + (6 * (1+5*self.hist_length))
+                                  + 5)
                                   # + 2 * 10)
             # road_structure: four nodes' positions - 4*2 (Ring road) / one node position - 2 (Straight road)
             # all_HDVs_state: pos_x, pos_y, speed, acceleration, heading - max_num_HDVs*9
             # all_CAVs_state: pos_x, pos_y, speed, acceleration, heading - max_num_CAVs*5
-            # all_lane_statistics - start, end, num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 4*10
-            # all_lane_distribution: each lane-veh_info: type, pos_x, pos_y, speed, acceleration, heading - 4 * (max_num_vehs_lane) *6
-            self.shared_obs_size = 2 + (self.max_num_HDVs + 1)*5 + self.max_num_CAVs*5  # + 4*10 + 4 * self.lane_max_num_vehs * 6
+            # all_lane_statistics - start, end, num_veh, lane_length, density, mean_speed, mean_acceleration, CAV_penetration - 4*10 (Ring road)
+            # all_lane_distribution: each lane-veh_info: type, pos_x, pos_y, speed, acceleration, heading - 4 * (max_num_vehs_lane)*6 (Ring road)
+            # flow_statistics: num_veh, mean_speed, mean_acceleration, num_CAV, CAV_penetration - 5*hist_length (Straight road)
+            # veh_distribution: veh_info: type, pos_x, pos_y, speed, acceleration, heading - max_num_vehs_lane*6*hist_length (Straight road)
+            self.shared_obs_size = 2 + (self.max_num_HDVs+1)*5 + self.max_num_CAVs*5 + 5*self.hist_length + self.lane_max_num_vehs*6*self.hist_length
         self.vehicles_hist = {}
         # self.lanes_hist = {}
+        self.flow_hist = {}
+        self.veh_distribution_hist = {}
         if self.use_hist_info:
             self.obs_size = self.self_obs_size
             for i in range(self.hist_length):
                 self.vehicles_hist[f'hist_{i+1}'] = {veh_id: [0.0]*5 for veh_id in self.veh_ids}
                 # self.lanes_hist[f'hist_{i+1}'] = {lane_id: np.zeros(26) for lane_id in self.calc_features_lane_ids}
+                self.flow_hist[f'hist_{i+1}'] = [0.0]*5
+                self.veh_distribution_hist[f'hist_{i+1}'] = np.zeros(self.lane_max_num_vehs * 6)
         else:
             self.obs_size = self.self_obs_size
         self.surround_vehicle_2 = {ego_id: {} for ego_id in self.ego_ids}
@@ -184,7 +191,7 @@ class VehEnvWrapper(gym.Wrapper):
     @property
     def action_space(self):
         """定义连续的动作空间，加速度范围为 [-3, 3]"""
-        return {_ego_id: gym.spaces.Box(low=np.array([-3.0]), high=np.array([3.0]), dtype=np.float32) for _ego_id in
+        return {_ego_id: gym.spaces.Box(low=np.array([-1.0]), high=np.array([1.0]), dtype=np.float32) for _ego_id in
                 self.ego_ids}
 
     @property
@@ -390,6 +397,14 @@ class VehEnvWrapper(gym.Wrapper):
     def __update_actions(self, raw_action):
         """更新 ego 车辆的速度
         """
+        delay_acc = 0.25
+        K_acc = 0.75
+        IDM_a = 2
+        IDM_b = 4
+        IDM_v0 = 20
+        IDM_T = 1.5
+        IDM_s0 = 2
+        self.actual_actions = {ego_id: [] for ego_id in self.ego_ids}
         for vehicle_id in self.surround_vehicle_2.keys(): # self.surround_vehicle_expand.keys():
             for surround_key in self.required_surroundings:
                 if surround_key not in self.surround_vehicle_2[vehicle_id]:
@@ -399,298 +414,33 @@ class VehEnvWrapper(gym.Wrapper):
 
         for _veh_id in raw_action:
             if _veh_id in self.actions:  # 只更新 ego vehicle 的速度
-                # 不换掉，只需要更新速度
-                speed_command = min(20, max(0, self.current_speed[_veh_id] + raw_action[_veh_id]))
+                # IDM model
+                ego_x = self.vehicles_info[_veh_id][3] if self.vehicles_info != {} else 0
+                ego_v = self.vehicles_info[_veh_id][5] if self.vehicles_info != {} else 0
+                if self.surround_vehicle_2[_veh_id] != {}:
+                    front_1 = self.surround_vehicle_2[_veh_id]['front']
+                    delta_v = front_1[4]
+                    delta_s = front_1[2]
+                else:
+                    delta_v = 0
+                    delta_s = 0
+                s_star = IDM_s0 + max(0, ego_v * IDM_T + ego_v * delta_v / (2 * np.sqrt(IDM_a * IDM_b)))
+                a_IDM = IDM_a * (1 - (ego_v / IDM_v0) ** 4 - (s_star / delta_s) ** 2)
+                # 不换道，只需要更新速度
+                control_input = raw_action[_veh_id] + a_IDM
+                # current_acceleration = self.vehicles_info[_veh_id][6] if self.vehicles_info != {} else 0
+                # time_step = self.vehicles_info[_veh_id][0] + 1 if self.vehicles_info != {} else 1
+                # random_number = random.randint(1, 10)
+                # distrubance_acc = 2 * np.sin(0.25 * time_step)
+                # delta_acceleration = -1/delay_acc * current_acceleration + K_acc / delay_acc * control_input + distrubance_acc
+                actual_acceleration = control_input # current_acceleration + delta_acceleration
+                self.actual_actions[_veh_id].append([raw_action[_veh_id], control_input, actual_acceleration])
+                speed_command = min(20, max(0, self.current_speed[_veh_id] + actual_acceleration))
                 self.actions[_veh_id] = (0, speed_command)
-                # if raw_action[_veh_id] in range(0, 7):
-                #     speed_command = min(20, max(0, self.current_speed[_veh_id]+self.action_pointer[raw_action[_veh_id]]))
-                #     # if speed_command <= 0:
-                #     #     print('debug')
-                #     self.action_command = (0, speed_command)
-                # else:
-                #     raise ValueError(f'Action {raw_action[_veh_id]} is not in the range of 0-6')
-                # self.actions[_veh_id] = self.action_command
 
                 self.actor_action[_veh_id].append([raw_action[_veh_id], speed_command])
 
-                # self.safety_before[_veh_id] = self.safety_assessment(_veh_id, self.action_command)
-                # self.actions[_veh_id] = self.lower_controller(_veh_id, self.action_command, 2)
-                # self.safety_after[_veh_id] = self.safety_assessment(_veh_id, self.actions[_veh_id])
-
-                # action_0 = self.actions[_veh_id][0]
-                # action_1 = self.actions[_veh_id][1]
-                # current_speed = self.current_speed[_veh_id]
-                # if action_0 == 1:
-                #     lc_action = 1
-                # elif action_0 == 2:
-                #     lc_action = 2
-                # else:
-                #     if action_1 > current_speed:
-                #         lc_action = 3
-                #     elif action_1 < current_speed:
-                #         lc_action = 4
-                #     else:
-                #         lc_action = 0
-                # self.lowercontroller_action[_veh_id].append([lc_action, action_0, action_1])
-
-                # if self.actions[_veh_id][0] != self.action_command[0]:
-                #     change_action_mark = 1
-                # else:
-                #     change_action_mark = 0
-                # if self.vehicles_info:
-                #     if _veh_id == 'CAV_0' and self.vehicles_info[_veh_id][0] == 1:
-                #         now_time = time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
-                #         self.csv_dir = self.save_csv_dir + '/' + now_time
-                #         os.makedirs(self.csv_dir)
-                #     veh_info = [self.vehicles_info[_veh_id][0], change_action_mark]
-                #     csv_path = self.csv_dir + '/' + _veh_id + '_mark.csv'
-                #     with open(csv_path, 'a', newline='') as csvfile:
-                #         writer = csv.writer(csvfile)
-                #         writer.writerow(veh_info)
-                # if self.safety_after[_veh_id] < 1.0:
-                #     print("Safety Level is too low!!!")
-
-                # self.actions[_veh_id] = self.action_command
-
         return self.actions
-
-    def safety_assessment(self, _veh_id, action):
-        safety_level = 100
-        if self.vehicles_info:
-            bottleneck_point = self.bottle_neck_positions[0] - 20
-            front_key = ['front', 'left_leaders', 'right_leaders']
-            back_key = ['back', 'left_followers', 'right_followers']
-            for key in front_key:
-                if self.surround_vehicle[_veh_id][key]:
-                    relative_x = self.surround_vehicle[_veh_id][key][1]
-                    relative_v = self.surround_vehicle[_veh_id][key][3]
-                    TTC_x = relative_x / relative_v if relative_v != 0 else abs(relative_x)
-                    if relative_x <= 0:
-                        TTC_x = -TTC_x if TTC_x > 0 else TTC_x
-                    elif relative_v < 0:
-                        TTC_x = 5 + abs(relative_x)
-                    self.TTC_assessment[_veh_id][key] = TTC_x
-                else:
-                    self.TTC_assessment[_veh_id][key] = 100
-            for key in back_key:
-                if self.surround_vehicle[_veh_id][key]:
-                    relative_x = self.surround_vehicle[_veh_id][key][1]
-                    relative_v = self.surround_vehicle[_veh_id][key][3]
-                    TTC_x = relative_x / relative_v if relative_v != 0 else abs(relative_x)
-                    if relative_x >= 0:
-                        TTC_x = -TTC_x if TTC_x > 0 else TTC_x
-                    elif relative_v > 0:
-                        TTC_x = 5 + abs(relative_x)
-                    self.TTC_assessment[_veh_id][key] = TTC_x
-                else:
-                    self.TTC_assessment[_veh_id][key] = 100
-
-            if action[0] == 1:
-                safety_level = min(self.TTC_assessment[_veh_id]['left_leaders'], self.TTC_assessment[_veh_id]['left_followers'])
-            elif action[0] == 2:
-                safety_level = min(self.TTC_assessment[_veh_id]['right_leaders'], self.TTC_assessment[_veh_id]['right_followers'])
-            else:
-                if self.surround_vehicle[_veh_id]['front']:
-                    v_front = self.current_speed[_veh_id] - self.surround_vehicle[_veh_id]['front'][3]
-                    relative_v_after = action[1] - v_front
-                    relative_x_after = self.surround_vehicle[_veh_id]['front'][1] - relative_v_after
-                    TTC_after = relative_x_after / relative_v_after if relative_v_after != 0 else abs(relative_x_after)
-                    if relative_x_after <= 0:
-                        TTC_after = -TTC_after if TTC_after > 0 else TTC_after
-                    elif relative_v_after < 0:
-                        TTC_after = 5 + abs(relative_v_after)
-                    safety_level = TTC_after
-                elif self.vehicles_info[_veh_id][4] > bottleneck_point and abs(self.vehicles_info[_veh_id][5]) > 2:
-                    if self.vehicles_info[_veh_id][5] < -2:
-                        safety_front = self.TTC_assessment[_veh_id]['left_leaders']
-                        safety_back = self.TTC_assessment[_veh_id]['left_followers']
-                    else:
-                        safety_front = self.TTC_assessment[_veh_id]['right_leaders']
-                        safety_back = self.TTC_assessment[_veh_id]['right_followers']
-                    safety_level = min(safety_front, safety_back)
-                    if action[1] == 0:
-                        safety_level = 100
-                else:
-                    safety_level = 100
-
-        return safety_level
-    def safety_assessment_expand(self, _veh_id, action):
-        safety_level = 100
-        if self.vehicles_info:
-            bottleneck_point = self.bottle_neck_positions[0] - 20
-            front_key = ['front', 'front_expand', 'left_leaders', 'left_leaders_expand', 'right_leaders', 'right_leaders_expand']
-            back_key = ['back', 'back_expand', 'left_followers', 'left_followers_expand', 'right_followers', 'right_followers_expand']
-            for key in front_key:
-                if self.surround_vehicle_expand[_veh_id][key]:
-                    relative_x = self.surround_vehicle_expand[_veh_id][key][1]
-                    relative_v = self.surround_vehicle_expand[_veh_id][key][3]
-                    TTC_x = relative_x / relative_v if relative_v != 0 else abs(relative_x)
-                    if relative_x <= 0:
-                        TTC_x = -TTC_x if TTC_x > 0 else TTC_x
-                    elif relative_v < 0:
-                        TTC_x = 5 + abs(relative_x)
-                    self.TTC_assessment[_veh_id][key] = TTC_x
-                else:
-                    self.TTC_assessment[_veh_id][key] = 100
-            for key in back_key:
-                if self.surround_vehicle_expand[_veh_id][key]:
-                    relative_x = self.surround_vehicle_expand[_veh_id][key][1]
-                    relative_v = self.surround_vehicle_expand[_veh_id][key][3]
-                    TTC_x = relative_x / relative_v if relative_v != 0 else abs(relative_x)
-                    if relative_x >= 0:
-                        TTC_x = -TTC_x if TTC_x > 0 else TTC_x
-                    elif relative_v > 0:
-                        TTC_x = 5 + abs(relative_x)
-                    self.TTC_assessment[_veh_id][key] = TTC_x
-                else:
-                    self.TTC_assessment[_veh_id][key] = 100
-
-            if action[0] == 1:
-                safety_level = min(self.TTC_assessment[_veh_id]['left_leaders'], self.TTC_assessment[_veh_id]['left_followers'])
-            elif action[0] == 2:
-                safety_level = min(self.TTC_assessment[_veh_id]['right_leaders'], self.TTC_assessment[_veh_id]['right_followers'])
-            else:
-                if self.surround_vehicle_expand[_veh_id]['front']:
-                    v_front = self.current_speed[_veh_id] - self.surround_vehicle_expand[_veh_id]['front'][3]
-                    relative_v_after = action[1] - v_front
-                    relative_x_after = self.surround_vehicle_expand[_veh_id]['front'][1] - relative_v_after
-                    TTC_after = relative_x_after / relative_v_after if relative_v_after != 0 else abs(relative_x_after)
-                    if relative_x_after <= 0:
-                        TTC_after = -TTC_after if TTC_after > 0 else TTC_after
-                    elif relative_v_after < 0:
-                        TTC_after = 5 + abs(relative_v_after)
-                    if self.surround_vehicle_expand[_veh_id]['front_expand']:
-                        v_front_expand = self.current_speed[_veh_id] - self.surround_vehicle_expand[_veh_id]['front_expand'][3]
-                        relative_v_after_expand = action[1] - v_front_expand
-                        relative_x_after_expand = self.surround_vehicle_expand[_veh_id]['front_expand'][1] - relative_v_after_expand
-                        TTC_after_expand = relative_x_after_expand / relative_v_after_expand if relative_v_after_expand != 0 else abs(relative_x_after_expand)
-                        if relative_x_after_expand <= 0:
-                            TTC_after_expand = -TTC_after_expand if TTC_after_expand > 0 else TTC_after_expand
-                        elif relative_v_after_expand < 0:
-                            TTC_after_expand = 5 + abs(relative_v_after_expand)
-                        safety_level = min(TTC_after, TTC_after_expand)
-                elif self.vehicles_info[_veh_id][4] > bottleneck_point and abs(self.vehicles_info[_veh_id][5]) > 2:
-                    if self.vehicles_info[_veh_id][5] < -2:
-                        safety_front = self.TTC_assessment[_veh_id]['left_leaders']
-                        safety_back = self.TTC_assessment[_veh_id]['left_followers']
-                    else:
-                        safety_front = self.TTC_assessment[_veh_id]['right_leaders']
-                        safety_back = self.TTC_assessment[_veh_id]['right_followers']
-                    safety_level = min(safety_front, safety_back)
-                    if action[1] == 0:
-                        safety_level = 100
-                else:
-                    safety_level = 100
-
-        return safety_level
-
-    def lower_controller(self, _veh_id, action, acc_improve):
-        ### 下层控制器--基于安全评估的控制微调
-        if action[0] == 1:
-            if self.surround_vehicle[_veh_id]['left_leaders']:
-                relative_distance = self.surround_vehicle[_veh_id]['left_leaders'][1]
-                relative_speed = self.surround_vehicle[_veh_id]['left_leaders'][3]
-                if relative_distance <= 1:
-                    action = (0, self.current_speed[_veh_id])
-                elif relative_distance <= 5:
-                    if relative_speed > 0:
-                        time_collision = relative_distance / relative_speed
-                        if time_collision <= 2:
-                            action = (0, self.current_speed[_veh_id])
-                        elif time_collision <= 5:
-                            action = (1, max(0, self.current_speed[_veh_id]-self.delta_t*max(acc_improve, relative_speed)))
-                elif relative_distance <= 15:
-                    if relative_speed > 0:
-                        time_collision = relative_distance / relative_speed
-                        if time_collision <= 2:
-                            action = (1, max(0, self.current_speed[_veh_id]-self.delta_t*max(acc_improve, relative_speed)))
-            if self.surround_vehicle[_veh_id]['left_followers']:
-                relative_distance = self.surround_vehicle[_veh_id]['left_followers'][1]
-                relative_speed = self.surround_vehicle[_veh_id]['left_followers'][3]
-                if relative_distance >= -1:
-                    action = (0, self.current_speed[_veh_id])
-                elif relative_distance >= -5:
-                    if relative_speed < 0:
-                        time_collision = relative_distance / relative_speed
-                        if time_collision <= 2:
-                            action = (0, self.current_speed[_veh_id])
-                        elif time_collision <= 5:
-                            if action[1] != self.current_speed[_veh_id]:
-                                action = (0, self.current_speed[_veh_id])
-                elif relative_distance >= -15:
-                    if relative_speed < 0:
-                        time_collision = relative_distance / relative_speed
-                        if time_collision <= 2:
-                            if action[1] != self.current_speed[_veh_id]:
-                                action = (0, self.current_speed[_veh_id])
-        if action[0] == 2:
-            if self.surround_vehicle[_veh_id]['right_leaders']:
-                relative_distance = self.surround_vehicle[_veh_id]['right_leaders'][1]
-                relative_speed = self.surround_vehicle[_veh_id]['right_leaders'][3]
-                if relative_distance <= 1:
-                    action = (0, self.current_speed[_veh_id])
-                elif relative_distance <= 5:
-                    if relative_speed > 0:
-                        time_collision = relative_distance / relative_speed
-                        if time_collision <= 2:
-                            action = (0, self.current_speed[_veh_id])
-                        elif time_collision <= 5:
-                            action = (2, max(0, self.current_speed[_veh_id]-self.delta_t*max(acc_improve, relative_speed)))
-                elif relative_distance <= 15:
-                    if relative_speed > 0:
-                        time_collision = relative_distance / relative_speed
-                        if time_collision <= 2:
-                            action = (2, max(0, self.current_speed[_veh_id]-self.delta_t*max(acc_improve, relative_speed)))
-            if self.surround_vehicle[_veh_id]['right_followers']:
-                relative_distance = self.surround_vehicle[_veh_id]['right_followers'][1]
-                relative_speed = self.surround_vehicle[_veh_id]['right_followers'][3]
-                if relative_distance >= -1:
-                    action = (0, self.current_speed[_veh_id])
-                elif relative_distance >= -5:
-                    if relative_speed < 0:
-                        time_collision = relative_distance / relative_speed
-                        if time_collision <= 2:
-                            action = (0, self.current_speed[_veh_id])
-                        elif time_collision <= 5:
-                            if action[1] != self.current_speed[_veh_id]:
-                                action = (0, self.current_speed[_veh_id])
-                elif relative_distance >= -15:
-                    if relative_speed < 0:
-                        time_collision = relative_distance / relative_speed
-                        if time_collision <= 2:
-                            if action[1] != self.current_speed[_veh_id]:
-                                action = (0, self.current_speed[_veh_id])
-        if action[0] == 0:
-            if self.surround_vehicle[_veh_id]['front']:
-                relative_distance = self.surround_vehicle[_veh_id]['front'][1]
-                relative_speed = self.surround_vehicle[_veh_id]['front'][3]
-                if relative_distance <= 5:
-                    if relative_speed > 0:
-                        action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * max(acc_improve, relative_speed+2)))
-                    else:
-                        action = (0, self.current_speed[_veh_id])
-                elif relative_distance <= 8:
-                    if relative_speed > 0:
-                        action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * max(acc_improve, relative_speed+2)))
-                    else:
-                        if action[1] > self.current_speed[_veh_id]:
-                            action = (0, self.current_speed[_veh_id])
-                elif relative_distance <= 15:
-                    if relative_speed > 0:
-                        time_collision = relative_distance / relative_speed
-                        if time_collision <= 3:
-                            action = (0, max(0, self.current_speed[_veh_id] - self.delta_t * max(acc_improve, relative_speed)))
-                        elif time_collision <= 5:
-                            if action[1] > self.current_speed[_veh_id]:
-                                action = (0, self.current_speed[_veh_id])
-                    # elif relative_speed < 0:
-                    #     action = (0, min(15, self.current_speed[_veh_id] + self.delta_t * acc_improve))
-                # else:
-                #     if relative_speed <= 0:
-                #         action = (0, min(15, self.current_speed[_veh_id] + self.delta_t * acc_improve))
-            # else:
-            #     action = (0, min(15, self.current_speed[_veh_id] + self.delta_t * acc_improve))
-        return action
 
     # ##########################
     # State and Reward Wrappers
@@ -760,17 +510,25 @@ class VehEnvWrapper(gym.Wrapper):
 
         """
         max_speed = 20  # ego vehicle 的最快的速度
+        max_acceleration = 3
+        TTC_warning_threshold = 1.0
+        TTC_collision_threshold = 0.5
+        K_TTC = 20 / (TTC_warning_threshold - TTC_collision_threshold)
+        T_exp = 1
+        L_exp = 2
 
         # 先把reward_statistics中所有的车辆的信息都全局记录下来self.vehicles_info
-        for veh_id, (road_id, distance, speed, acceleration, position_x, position_y, waiting_time, accumulated_waiting_time) in reward_statistics.items():
+        for veh_id, (road_id, distance, position_x, position_y, speed, acceleration, heading, waiting_time,
+                     accumulated_waiting_time) in reward_statistics.items():
             self.vehicles_info[veh_id] = [
                 self.vehicles_info.get(veh_id, [0, None])[0] + 1,  # travel time
                 road_id,
                 distance,
-                speed,
-                acceleration,
                 position_x,
                 position_y,
+                speed,
+                acceleration,
+                heading,
                 waiting_time,
                 accumulated_waiting_time
             ]
@@ -781,8 +539,7 @@ class VehEnvWrapper(gym.Wrapper):
                     del self.vehicles_info[veh_id]
 
         # ######################### 开始计算reward  # #########################
-        inidividual_rew_ego = {key: 0 for key in list(set(self.ego_ids) - set(self.out_of_road))}
-        time_penalty_ego = {key: 0 for key in list(set(self.ego_ids) - set(self.out_of_road))}
+        inidividual_rew_ego = {key: {} for key in list(set(self.ego_ids) - set(self.out_of_road))}
 
         # ######################## 初始化 for group reward ########################
         all_ego_vehicle_speed = []  # CAV车辆的平均速度 - 使用target speed
@@ -797,8 +554,9 @@ class VehEnvWrapper(gym.Wrapper):
         all_vehicle_accumulated_waiting_time = []  # CAV和HDV车辆的累积平均等待时间
         all_vehicle_waiting_time = []  # CAV和HDV车辆的等待时间
 
-        for veh_id, (veh_travel_time, road_id, distance, speed, acceleration, position_x,
-                     position_y, waiting_time, accumulated_waiting_time) in list(self.vehicles_info.items()):
+        for veh_id, (veh_travel_time, road_id, distance, position_x,
+                     position_y, speed, acceleration, heading,
+                     waiting_time, accumulated_waiting_time) in list(self.vehicles_info.items()):
 
             # CAV和HDV车辆的
             all_vehicle_speed.append(speed)
@@ -822,97 +580,86 @@ class VehEnvWrapper(gym.Wrapper):
                 # individual_speed_r = -abs(distance / veh_travel_time - max_speed) / max_speed * 5 + 5
                 # inidividual_rew_ego[veh_id] += 1 * individual_speed_r
 
-                # CAV车辆的target速度越靠近最大速度，reward越高 - [0, 5]
-                individual_speed_r_simple = (-abs(speed - max_speed) / max_speed * 5 + 5) * 1
-                inidividual_rew_ego[veh_id] += individual_speed_r_simple
-                # CAV车辆的加速度绝对值越小，reward越高 - [0, 6]
-                # individual_acceleration_r = (-abs(acceleration) + 6) * 0.5
-                # inidividual_rew_ego[veh_id] += individual_acceleration_r
+                # CAV车辆的target速度越靠近最大速度，reward越高 - [0, 1]
+                individual_speed_r_simple = -abs(speed - max_speed) / max_speed * 1 + 1
+                inidividual_rew_ego[veh_id]['efficiency'] = individual_speed_r_simple
+                # CAV车辆的加速度绝对值越小，reward越高 - [-1, 0]
+                # individual_acceleration_r = -(acceleration ** 2) * 0.5
+                individual_acceleration_r = -((acceleration/max_acceleration) ** 2) # + 1
+                inidividual_rew_ego[veh_id]['comfort'] = individual_acceleration_r
 
-                # # CAV车辆的等待时间越短，reward越高 - (-infty,0]
-                # individual_accumulated_waiting_time_r = -accumulated_waiting_time
-                # inidividual_rew_ego[veh_id] += individual_accumulated_waiting_time_r
-                # individual_waiting_time_r = -waiting_time
-                # inidividual_rew_ego[veh_id] += individual_waiting_time_r * 1
+                # 警告距离和碰撞距离, stability-related values
+                if 'front' not in ego_statistics[veh_id][6].keys():
+                    TTC = 100
+                    s_act = L_exp
+                    v_act = 0
+                    delta_v = 0
+                else:
+                    front_info = ego_statistics[veh_id][6]['front']
+                    TTC = front_info[7]
+                    s_act = front_info[2]
+                    v_act = ego_statistics[veh_id][1]
+                    delta_v = -front_info[4]
+                # stability reward
+                delta_s = s_act - (v_act * T_exp + L_exp)
+                stability_matric = np.array([delta_s, delta_v])
+                stability_weight = np.array([[1, 0], [0, 0.5]])
+                e_ss = stability_matric @ stability_weight @ stability_matric.T
+                inidividual_rew_ego[veh_id]['stability'] = np.exp(-e_ss)
 
-                ## reward is higher when the vehicle is closer to the end of the road
-                # individual_position_r = position_x / self.bottle_neck_positions[0]
-                # inidividual_rew_ego[veh_id] += individual_position_r * 1
-
-                # 警告距离和碰撞距离
-                if veh_id in self.warn_ego_ids.keys():
-                    individual_warn_r = 0
-                    for dis in self.warn_ego_ids[veh_id]:
-                        # CAV车辆的警告距离越远，reward越高 - [0, 5]
-                        individual_warn_r += -(WARN_GAP_THRESHOLD - dis) / (
-                                WARN_GAP_THRESHOLD - GAP_THRESHOLD) * 10  # [-10, 0]
-                    inidividual_rew_ego[veh_id] += individual_warn_r * 0.1
-
-                if veh_id in self.coll_ego_ids.keys():
-                    individual_coll_r = 0
-                    for dis in self.coll_ego_ids[veh_id]:
-                        # CAV车辆的碰撞距离越远，reward越高 - [0, 5]
-                        individual_coll_r += -(GAP_THRESHOLD - dis) / GAP_THRESHOLD * 20 - 10  # [-30, -10]
-                    inidividual_rew_ego[veh_id] += individual_coll_r * 0.1
-
-                time_penalty_ego[veh_id] = 0
-                # time_penalty_ego[veh_id] = (1 / (1 + np.exp(10 - speed)) - 0.5) * 5
+                if TTC_collision_threshold < TTC <= TTC_warning_threshold:
+                    safety_r = (1 / np.exp(-(K_TTC * (TTC - (TTC_collision_threshold + TTC_warning_threshold)/2)))) - 1
+                elif TTC <= TTC_collision_threshold:
+                    safety_r = -1
+                else:
+                    safety_r = 0
+                inidividual_rew_ego[veh_id]['safety'] = safety_r  # [-1, 0]
+        all_rew_ego = inidividual_rew_ego.copy()
+        rew_safety = {key: inidividual_rew_ego[key]['safety'] for key in inidividual_rew_ego}
+        rew_stability = {key: inidividual_rew_ego[key]['stability'] for key in inidividual_rew_ego}
+        rew_efficiency = {key: inidividual_rew_ego[key]['efficiency'] for key in inidividual_rew_ego}
+        rew_comfort = {key: inidividual_rew_ego[key]['comfort'] for key in inidividual_rew_ego}
 
         # 计算全局reward
         all_ego_vehicle_speed = np.mean(all_ego_vehicle_speed)  # CAV车辆的平均速度 - 使用target speed
         # all_ego_mean_speed = np.mean(all_ego_vehicle_mean_speed)  # CAV车辆的累积平均速度 - 使用速度/时间
         all_ego_vehicle_acceleration = np.mean(all_ego_vehicle_acceleration)  # CAV车辆的平均加速度
-        # all_ego_vehicle_accumulated_waiting_time = np.mean(all_ego_vehicle_accumulated_waiting_time)  # CAV车辆的累积平均等待时间
-        # all_ego_vehicle_waiting_time = np.mean(all_ego_vehicle_waiting_time)  # CAV车辆的mean等待时间
 
         all_vehicle_speed = np.mean(all_vehicle_speed)  # CAV和HDV车辆的平均速度 - 使用target speed
         # all_vehicle_mean_speed = np.mean(all_vehicle_mean_speed)  # CAV和HDV车辆的累积平均速度 - 使用速度/时间
         all_vehicle_acceleration = np.mean(all_vehicle_acceleration)  # CAV和HDV车辆的平均加速度
-        # all_vehicle_accumulated_waiting_time = np.mean(all_vehicle_accumulated_waiting_time)  # CAV和HDV车辆的累积平均等待时间
-        # all_vehicle_waiting_time = np.mean(all_vehicle_waiting_time)  # CAV和HDV车辆的mean等待时间
-
-        global_ego_speed_r = -abs(all_ego_vehicle_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
+        global_ego_speed_r = -abs(all_ego_vehicle_speed - max_speed) / max_speed * 1 + 1  # [0, 5]
         # global_ego_mean_speed_r = -abs(all_ego_mean_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
-        global_ego_acceleration_r = -abs(all_ego_vehicle_acceleration) + 6  # [0, 6]
-        # global_ego_accumulated_waiting_time_r = -all_ego_vehicle_accumulated_waiting_time   # (-infty,0]
-        # global_ego_waiting_time_r = -all_ego_vehicle_waiting_time   # (-infty,0]
+        # global_ego_acceleration_r = -abs(all_ego_vehicle_acceleration) + 6  # [0, 6]
+        global_ego_acceleration_r = -((all_ego_vehicle_acceleration/max_acceleration) ** 2) # + 1
 
         # global_all_speed_r = -abs(all_vehicle_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
         # global_all_mean_speed_r = -abs(all_vehicle_mean_speed - max_speed) / max_speed * 5 + 5  # [0, 5]
         # global_all_acceleration_r = -abs(all_vehicle_acceleration) + 6   # [0, 6]
-        # global_all_accumulated_waiting_time_r = -all_vehicle_accumulated_waiting_time   # [0, 5]
-        # global_all_waiting_time_r = -all_vehicle_waiting_time   # (-infty,0]
+        for veh_id in all_rew_ego.keys():
+            all_rew_ego[veh_id]['global_efficiency'] = global_ego_speed_r
+            all_rew_ego[veh_id]['global_comfort'] = global_ego_acceleration_r
 
+        time_penalty = 0
+        weight = {'efficiency': 1, 'comfort': 1, 'safety': 1, 'stability': 1}
 
-        time_penalty = -1
-
-        # TODO： lane_statistics  在E2的等待时间
-        # TODO: 完成时间越短，reward越高 - [0, 5]
-
-        # rewards = {key: inidividual_rew_ego[key] + range_reward_ego[key] + global_speed_r + global_waiting_time_r for
-        #            key in inidividual_rew_ego}
-        # rewards = {key: inidividual_rew_ego[key] + range_reward_ego[key] + global_speed_r + global_waiting_time_r + \
-        #               global_ego_speed_r + global_ego_waiting_time_r for key in inidividual_rew_ego}
-
-        rewards = {key: (1-self.CAV_penetration) * inidividual_rew_ego[key] \
-                        # + range_reward_ego[key] \
-                        # + is_in_bottleneck[key] * bottleneck_reward_ego[key] \
-                        + time_penalty_ego[key] \
-                        + self.CAV_penetration * global_ego_speed_r \
+        rewards = {key: weight['safety'] * inidividual_rew_ego[key]['safety'] \
+                        + weight['stability'] * inidividual_rew_ego[key]['stability'] \
+                        + weight['efficiency'] * (1-self.CAV_penetration) * inidividual_rew_ego[key]['efficiency'] \
+                        + weight['comfort'] * (1-self.CAV_penetration) * inidividual_rew_ego[key]['comfort'] \
+                        # + time_penalty_ego[key] \
+                        + weight['efficiency'] * self.CAV_penetration * all_rew_ego[key]['global_efficiency'] \
                         # + global_ego_mean_speed_r \
-                        # + self.CAV_penetration * global_ego_acceleration_r \
+                        + weight['comfort'] * self.CAV_penetration * all_rew_ego[key]['global_comfort'] \
                         # + global_ego_waiting_time_r \
                         # + global_ego_accumulated_waiting_time_r \
                         # + global_all_speed_r \
                         # + global_all_mean_speed_r \
                         # + global_all_acceleration_r \
-                        # + global_all_waiting_time_r \
-                        # + global_all_accumulated_waiting_time_r \
                         + time_penalty
                    for key in inidividual_rew_ego}
 
-        return rewards, all_vehicle_speed, all_vehicle_acceleration
-
+        return rewards, all_vehicle_speed, all_vehicle_acceleration, rew_safety, rew_stability, rew_efficiency, rew_comfort
     # ############
     # Collision
     # #############
@@ -1115,11 +862,11 @@ class VehEnvWrapper(gym.Wrapper):
         # 处理 dones 和 infos
         if len(self.coll_ego_ids) == 0 and len(feature_vectors) > 0:  # 还有车在路上 且还没有碰撞发生
             # 计算此时的reward （这里的reward只有还在路网上的车的reward）
-            rewards, mean_speeds, mean_accelerations = self.reward_wrapper(lane_statistics, ego_statistics, reward_statistics)
+            rewards, mean_speeds, mean_accelerations, rew_safety, rew_stability, rew_efficiency, rew_comfort = self.reward_wrapper(lane_statistics, ego_statistics, reward_statistics)
 
         elif len(self.coll_ego_ids) > 0 and len(feature_vectors) > 0:  # 还有车在路上 但有车辆碰撞
             # 计算此时的reward
-            rewards, mean_speeds, mean_accelerations = self.reward_wrapper(lane_statistics, ego_statistics, reward_statistics)  # 更新 veh info
+            rewards, mean_speeds, mean_accelerations, rew_safety, rew_stability, rew_efficiency, rew_comfort = self.reward_wrapper(lane_statistics, ego_statistics, reward_statistics)  # 更新 veh info
             for collid_ego_id in self.coll_ego_ids:
                 infos['collision'].append(collid_ego_id)
                 self.agent_mask[collid_ego_id] = False
@@ -1215,7 +962,7 @@ class VehEnvWrapper(gym.Wrapper):
         #     if len(value) != 253 or (not isinstance(value, np.ndarray)):
         #         print('break')
 
-        return feature_vectors_flatten, shared_features_flatten, rewards, mean_speeds, mean_accelerations, dones.copy(), dones.copy(), infos
+        return feature_vectors_flatten, shared_features_flatten, rewards, mean_speeds, mean_accelerations, rew_safety, rew_stability, rew_efficiency, rew_comfort, dones.copy(), dones.copy(), infos
 
     def close(self) -> None:
         return super().close()

@@ -22,7 +22,7 @@ from harl.utils.envs_tools import (
 from harl.utils.models_tools import init_device
 from harl.utils.configs_tools import init_dir, save_config
 from harl.envs import LOGGER_REGISTRY
-
+import time
 
 class OnPolicyBaseRunner:
     """Base runner for on-policy algorithms."""
@@ -247,6 +247,7 @@ class OnPolicyBaseRunner:
         # 开始训练！！！！！！
         # 对于每一个episode
         for episode in range(1, episodes + 1):
+            # start = time.time()
             # 学习率是否随着episode线性递减
             if self.algo_args["train"]["use_linear_lr_decay"]:
                 # 是否共享actor网络
@@ -302,6 +303,10 @@ class OnPolicyBaseRunner:
                     rewards,
                     mean_v,
                     mean_acc,
+                    rewards_safety,
+                    rewards_stability,
+                    rewards_efficiency,
+                    rewards_comfort,
                     dones,
                     infos,
                     available_actions,
@@ -328,6 +333,10 @@ class OnPolicyBaseRunner:
                     action_losss,
                     mean_v,
                     mean_acc,
+                    rewards_safety,
+                    rewards_stability,
+                    rewards_efficiency,
+                    rewards_comfort,
                 )
 
                 self.logger.per_step(data)  # logger callback at each step
@@ -370,6 +379,8 @@ class OnPolicyBaseRunner:
 
             # 把上一个episode产生的最后一个timestep的state放入buffer的新的episode的第一个timestep
             self.after_update()
+            # end = time.time()
+            # print(f"Episode {episode} takes {end - start} seconds")
 
     def warmup(self):
         """
@@ -528,6 +539,10 @@ class OnPolicyBaseRunner:
             action_losss,  # (n_threads, n_agents, 1)
             mean_v,  # (n_threads, n_agents, 1)
             mean_acc,  # (n_threads, n_agents, 1)
+            rewards_safety,
+            rewards_stability,
+            rewards_efficiency,
+            rewards_comfort,
         ) = data
 
         # 检查所有env thread是否done (n_threads, )
@@ -645,6 +660,10 @@ class OnPolicyBaseRunner:
                 action_losss[:, agent_id],
                 mean_v[:],
                 mean_acc[:],
+                rewards_safety[:, agent_id],
+                rewards_stability[:, agent_id],
+                rewards_efficiency[:, agent_id],
+                rewards_comfort[:, agent_id],
                 masks[:, agent_id],
                 active_masks[:, agent_id],
                 available_actions[:, agent_id]
@@ -761,6 +780,10 @@ class OnPolicyBaseRunner:
                 eval_rewards,
                 eval_speed,
                 eval_acceleration,
+                eval_rewards_safety,
+                eval_rewards_stability,
+                eval_rewards_efficiency,
+                eval_rewards_comfort,
                 eval_dones,
                 eval_infos,
                 eval_available_actions,

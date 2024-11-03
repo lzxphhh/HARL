@@ -139,8 +139,8 @@ def analyze_traffic(state, lane_ids, max_veh_num):
         if lane_id in lane_ids:
             # reward计算需要的信息
             # 记录每一个 vehicle 的 (edge id, distance, speed), 用于统计 travel time 从而计算平均速度
-            reward_statistics[vehicle_id] = [road_id, distance, speed, acceleration,
-                                             position[0], position[1],
+            reward_statistics[vehicle_id] = [road_id, distance, position[0], position[1],
+                                             speed, acceleration, heading,
                                              waiting_time, accumulated_waiting_time]
 
         # ego车需要的信息
@@ -945,8 +945,8 @@ def compute_hierarchical_ego_vehicle_features(
         #                  node_positions[node_key][1] / state_divisors[1]]
         # next_node[ego_id] = next_node_pos + [dis_next_node]
 
-        next_node_pos = [1, 0]
-        next_node[ego_id] = next_node_pos + [1 - normalized_info[0]]
+        # next_node_pos = [1, 0]
+        next_node[ego_id] = [1 - normalized_info[0]]
 
     # Initialize missing CAV data
     initialize_missing_data(cav_stats, cav_hist, self.max_num_CAVs, self.hist_length, 'CAV')
@@ -1127,6 +1127,24 @@ def compute_hierarchical_ego_vehicle_features(
     # all_lane_distribution = np.array(flatten_list(list(all_lane_distribution.values())))
     # end = time.time()
     # print(f'hdv+cav+surround+lane time: {end - start}')
+    flow_stats = [(lane_statistics[0] / self.lane_max_num_vehs), (lane_statistics[1] / state_divisors[2]),
+                  (lane_statistics[4] / state_divisors[3]), (lane_statistics[7] / self.max_num_CAVs),
+                  (lane_statistics[8])]
+    veh_distribution = lane_statistics[9].flatten()
+    flow_hist_info = []
+    veh_distribution_hist_info = []
+    if self.use_hist_info:
+        # Loop optimization: Use a range based on precomputed values
+        for i in range(self.hist_length - 1, 0, -1):
+            # Minimize the use of deepcopy by reusing data where possible
+            self.flow_hist[f'hist_{i + 1}'] = self.flow_hist[f'hist_{i}'].copy()
+            self.veh_distribution_hist[f'hist_{i + 1}'] = self.veh_distribution_hist[f'hist_{i}'].copy()
+            flow_hist_info.append(self.flow_hist[f'hist_{i + 1}'])
+            veh_distribution_hist_info.append(self.veh_distribution_hist[f'hist_{i + 1}'])
+        self.flow_hist['hist_1'] = flow_stats.copy()
+        self.veh_distribution_hist['hist_1'] = veh_distribution.copy()
+        flow_hist_info.append(self.flow_hist['hist_1'])
+        veh_distribution_hist_info.append(self.veh_distribution_hist['hist_1'])
 
     def flatten_and_pad(surround_stats, pad_length):
         """展平嵌套列表并填充到指定长度"""
@@ -1151,10 +1169,7 @@ def compute_hierarchical_ego_vehicle_features(
     pad_len_6 = 6 * (1 + self.hist_length * 5)
 
     # 处理每个 ego_id 的信息
-    for ego_id, ego_info in ego_statistics.items():
-        position, speed, acceleration, heading, road_id, lane_index, surroundings_2, surroundings_4, surroundings_6 = ego_info
-        position_x, position_y = position
-
+    for ego_id in ego_statistics.keys():
         # 复制 feature_vector
         fv_current = feature_vector.copy()
 
@@ -1180,6 +1195,7 @@ def compute_hierarchical_ego_vehicle_features(
         # 分配车道统计信息
         # fv_current['ego_lane_stats'] = flatten_list(ego_lane_stats[ego_id])
         # fv_current['next_lane_stats'] = flatten_list(next_lane_stats[ego_id])
+        fv_current['flow_stats'] = flow_stats
 
         # 将当前 ego_id 的 feature_vector 存入 feature_vectors_current
         feature_vectors_current[ego_id] = fv_current
@@ -1188,6 +1204,8 @@ def compute_hierarchical_ego_vehicle_features(
         shared_fv_current = feature_vector.copy()
         shared_fv_current['hdv_stats'] = hdv_stats_array
         shared_fv_current['cav_stats'] = cav_stats_array
+        shared_fv_current['flow_hist'] = flatten_list(flow_hist_info)
+        shared_fv_current['veh_distribution_hist'] = flatten_list(veh_distribution_hist_info)
         # shared_fv_current['lane_stats'] = all_lane_stats
         # shared_fv_current['lane_distribution'] = all_lane_distribution
 

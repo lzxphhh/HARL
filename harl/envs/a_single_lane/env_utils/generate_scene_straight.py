@@ -22,7 +22,7 @@ def generate_scenario(
     """
     veh_num = CAV_num + HDV_num
     start_speed = 10
-    start_gap = 15
+    start_gap = 20
     start_pos = 500
     # generate HDVs with different driving behaviors
     random_numbers_HDV = [random.random() for _ in range(HDV_num)]
@@ -78,15 +78,6 @@ def generate_scenario(
                 departLane="random",
                 departSpeed=f'{start_speed}',
             )
-        scene_change.add(
-            vehID=f'CAV_{i_CAV}',
-            typeID='ego',
-            routeID=f'route_0',
-            depart="now",
-            departPos=f'{start_pos - veh_num * (start_gap + 5)}',
-            departLane="random",
-            departSpeed=f'{start_speed}',
-        )
 
     # uniform - CAVs are uniformly distributed
     else:
@@ -97,17 +88,17 @@ def generate_scenario(
         elif CAV_penetration == 0.1:
             distribution = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         elif CAV_penetration == 0.2:
-            distribution = [1, 0, 0, 0, 0, 0, 0, 1, 0, 0]
+            distribution = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0]
         elif CAV_penetration == 0.3:
-            distribution = [1, 0, 0, 1, 0, 0, 0, 1, 0, 0]
+            distribution = [1, 0, 0, 1, 0, 0, 1, 0, 0, 0]
         elif CAV_penetration == 0.4:
-            distribution = [1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+            distribution = [1, 0, 1, 0, 0, 1, 0, 1, 0, 0]
         elif CAV_penetration == 0.5:
             distribution = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0]
         elif CAV_penetration == 0.6:
-            distribution = [1, 0, 1, 0, 1, 1, 0, 1, 0, 1]
+            distribution = [1, 0, 1, 0, 1, 1, 0, 1, 1, 0]
         elif CAV_penetration == 0.7:
-            distribution = [1, 0, 1, 1, 0, 1, 1, 0, 1, 1]
+            distribution = [1, 1, 0, 1, 1, 0, 1, 1, 1, 0]
         elif CAV_penetration == 0.8:
             distribution = [1, 1, 0, 1, 1, 1, 0, 1, 1, 1]
         elif CAV_penetration == 0.9:
@@ -141,12 +132,3 @@ def generate_scenario(
                 departLane="random",
                 departSpeed=f'{start_speed}',
             )
-        scene_change.add(
-            vehID=f'CAV_{i_CAV}',
-            typeID='ego',
-            routeID=f'route_0',
-            depart="now",
-            departPos=f'{start_pos - veh_num * (start_gap + 5)}',
-            departLane="random",
-            departSpeed=f'{start_speed}',
-        )

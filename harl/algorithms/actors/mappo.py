@@ -104,7 +104,7 @@ class MAPPO(OnPolicyBase):
         # policy_loss.backward()
 
         # add prediction loss
-        entropy_loss = policy_loss - dist_entropy * self.entropy_coef
+        entropy_loss = policy_loss # - dist_entropy * self.entropy_coef
         action_loss = np.mean(action_losss_batch)
         # dynamic weight of each loss
         weight_action_loss = 0
@@ -279,6 +279,7 @@ class MAPPO(OnPolicyBase):
                 train_info["dist_entropy"] += dist_entropy.item()
                 train_info["actor_grad_norm"] += actor_grad_norm
                 train_info["ratio"] += imp_weights.mean()
+
 
         num_updates = self.ppo_epoch * self.actor_num_mini_batch
 

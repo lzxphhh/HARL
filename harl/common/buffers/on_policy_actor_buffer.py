@@ -90,6 +90,18 @@ class OnPolicyActorBuffer:
         self.accelerations = np.zeros(
             (self.episode_length, self.n_rollout_threads, 1), dtype=np.float32
         )
+        self.rewards_safety = np.zeros(
+            (self.episode_length, self.n_rollout_threads, 1), dtype=np.float32
+        )
+        self.rewards_stability = np.zeros(
+            (self.episode_length, self.n_rollout_threads, 1), dtype=np.float32
+        )
+        self.rewards_efficiency = np.zeros(
+            (self.episode_length, self.n_rollout_threads, 1), dtype=np.float32
+        )
+        self.rewards_comfort = np.zeros(
+            (self.episode_length, self.n_rollout_threads, 1), dtype=np.float32
+        )
 
         # Buffer for masks of this actor. Masks denotes at which point should the rnn states be reset.
         # 当前这个agent在不同并行环境的不同时间点是否done，如果done，那么就需要reset rnn
@@ -119,6 +131,10 @@ class OnPolicyActorBuffer:
         action_losss,
         mean_v,
         mean_acc,
+        reward_safety,
+        reward_stability,
+        reward_efficiency,
+        reward_comfort,
         masks,
         active_masks=None,
         available_actions=None,
@@ -133,6 +149,10 @@ class OnPolicyActorBuffer:
         self.speeds[self.step] = mean_v.copy()
         mean_acc = mean_acc.reshape(-1, 1)
         self.accelerations[self.step] = mean_acc.copy()
+        self.rewards_safety[self.step] = reward_safety.copy()
+        self.rewards_stability[self.step] = reward_stability.copy()
+        self.rewards_efficiency[self.step] = reward_efficiency.copy()
+        self.rewards_comfort[self.step] = reward_comfort.copy()
         self.masks[self.step + 1] = masks.copy()
         if active_masks is not None:
             self.active_masks[self.step + 1] = active_masks.copy()

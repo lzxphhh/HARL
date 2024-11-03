@@ -1,5 +1,5 @@
 scenario: single-lane
-task: rmappo_16_0.4
+task: rmappo_4_0.4
 
 sumo_cfg: "env_utils/Straight_SUMO_files/scenario.sumocfg"
 max_num_seconds: 100
@@ -8,11 +8,11 @@ use_gui: False
 
 # for veh wrapper
 scene_name: "Env_SingleLane"
-max_num_CAVs: 21
-max_num_HDVs: 17
-num_CAVs: 9  # num_CAVs/penetration_CAV should be an integer multiple of 10, except for penetration_CAV=1
-num_HDVs: 12
-lane_max_num_vehs: 22
+max_num_CAVs: 20
+max_num_HDVs: 20
+num_CAVs: 4  # num_CAVs/penetration_CAV should be an integer multiple of 10, except for penetration_CAV=1
+num_HDVs: 6
+lane_max_num_vehs: 20
 penetration_CAV: 0.4 # only 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1 are valid
 strategy: "base"  # "base" or "iMARL"
 use_hist_info: True

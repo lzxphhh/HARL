@@ -45,7 +45,15 @@ class SingleLaneLogger(BaseLogger):
         self.episode_lens = []
         self.one_episode_len = np.zeros(self.algo_args["train"]["n_rollout_threads"], dtype=int)
         self.train_episode_rewards = np.zeros(self.algo_args["train"]["n_rollout_threads"])
+        self.train_episode_rewards_safety = np.zeros(self.algo_args["train"]["n_rollout_threads"])
+        self.train_episode_rewards_stability = np.zeros(self.algo_args["train"]["n_rollout_threads"])
+        self.train_episode_rewards_efficiency = np.zeros(self.algo_args["train"]["n_rollout_threads"])
+        self.train_episode_rewards_comfort = np.zeros(self.algo_args["train"]["n_rollout_threads"])
         self.done_episodes_rewards = np.zeros(self.n_rollout_threads)
+        self.done_episodes_rewards_safety = np.zeros(self.n_rollout_threads)
+        self.done_episodes_rewards_stability = np.zeros(self.n_rollout_threads)
+        self.done_episodes_rewards_efficiency = np.zeros(self.n_rollout_threads)
+        self.done_episodes_rewards_comfort = np.zeros(self.n_rollout_threads)
         self.train_episode_mean_speed = np.zeros(self.algo_args["train"]["n_rollout_threads"])
         self.done_episodes_mean_speed = np.zeros(self.n_rollout_threads)
         self.train_episode_mean_acceleration = np.zeros(self.algo_args["train"]["n_rollout_threads"])
@@ -82,15 +90,27 @@ class SingleLaneLogger(BaseLogger):
             action_losss,
             mean_v,
             mean_acc,
+            rewards_safety,
+            rewards_stability,
+            rewards_efficiency,
+            rewards_comfort,
         ) = data
         # 并行环境中的每个环境是否done （n_env_threads, ）
         dones_env = np.all(dones, axis=1)
         # 并行环境中的每个环境的step reward （n_env_threads, ）
         reward_env = np.mean(rewards, axis=1).flatten()
+        reward_safety = np.mean(rewards_safety, axis=1).flatten()
+        reward_stability = np.mean(rewards_stability, axis=1).flatten()
+        reward_efficiency = np.mean(rewards_efficiency, axis=1).flatten()
+        reward_comfort = np.mean(rewards_comfort, axis=1).flatten()
         speeds_env = mean_v
         acceleration_env = mean_acc
         # 并行环境中的每个环境的episode reward （n_env_threads, ）累积
         self.train_episode_rewards += reward_env
+        self.train_episode_rewards_safety += reward_safety
+        self.train_episode_rewards_stability += reward_stability
+        self.train_episode_rewards_efficiency += reward_efficiency
+        self.train_episode_rewards_comfort += reward_comfort
         self.train_episode_mean_speed += speeds_env
         self.train_episode_mean_acceleration += acceleration_env
         # 并行环境中的每个环境的episode len （n_env_threads, ）累积
@@ -101,7 +121,15 @@ class SingleLaneLogger(BaseLogger):
             if dones_env[t]:
                 # 已经done的episode的总reward
                 self.done_episodes_rewards[t] = self.train_episode_rewards[t]
+                self.done_episodes_rewards_safety[t] = self.train_episode_rewards_safety[t]
+                self.done_episodes_rewards_stability[t] = self.train_episode_rewards_stability[t]
+                self.done_episodes_rewards_efficiency[t] = self.train_episode_rewards_efficiency[t]
+                self.done_episodes_rewards_comfort[t] = self.train_episode_rewards_comfort[t]
                 self.train_episode_rewards[t] = 0  # 归零这个以及done的episode的reward
+                self.train_episode_rewards_safety[t] = 0  # 归零这个以及done的episode的reward
+                self.train_episode_rewards_stability[t] = 0  # 归零这个以及done的episode的reward
+                self.train_episode_rewards_efficiency[t] = 0  # 归零这个以及done的episode的reward
+                self.train_episode_rewards_comfort[t] = 0  # 归零这个以及done的episode的reward
                 self.done_episodes_mean_speed[t] = self.train_episode_mean_speed[t] / self.one_episode_len[t]
                 self.train_episode_mean_speed[t] = 0  # 归零这个以及done的episode的reward
                 self.done_episodes_mean_acceleration[t] = self.train_episode_mean_acceleration[t] / self.one_episode_len[t]
@@ -157,6 +185,10 @@ class SingleLaneLogger(BaseLogger):
                 done_episode_lens.append(each_env_info['step_time']-1)
         average_collision_rate = collision_count / len(self.done_episode_infos)
         average_episode_return = np.mean(self.done_episodes_rewards)
+        average_episode_return_safety = np.mean(self.done_episodes_rewards_safety)
+        average_episode_return_stability = np.mean(self.done_episodes_rewards_stability)
+        average_episode_return_efficiency = np.mean(self.done_episodes_rewards_efficiency)
+        average_episode_return_comfort = np.mean(self.done_episodes_rewards_comfort)
         average_episode_speed = np.mean(self.done_episodes_mean_speed)
         average_episode_acceleration = np.mean(self.done_episodes_mean_acceleration)
         average_episode_step = np.mean(self.done_episode_lens)
@@ -198,6 +230,30 @@ class SingleLaneLogger(BaseLogger):
         )
 
         print(
+            "Some episodes done, average episode safety reward is {}.\n".format(
+                average_episode_return_safety
+            )
+        )
+
+        print(
+            "Some episodes done, average episode stability reward is {}.\n".format(
+                average_episode_return_stability
+            )
+        )
+
+        print(
+            "Some episodes done, average episode efficiency reward is {}.\n".format(
+                average_episode_return_efficiency
+            )
+        )
+
+        print(
+            "Some episodes done, average episode comfort reward is {}.\n".format(
+                average_episode_return_comfort
+            )
+        )
+
+        print(
             "Some episodes done, average episode speed is {}.\n".format(
                 average_episode_speed
             )
@@ -215,6 +271,18 @@ class SingleLaneLogger(BaseLogger):
         # )
         self.writter.add_scalar(
             "train_episode_rewards", average_episode_return, self.total_num_steps
+        )
+        self.writter.add_scalar(
+            "train_episode_rewards_safety", average_episode_return_safety, self.total_num_steps
+        )
+        self.writter.add_scalar(
+            "train_episode_rewards_stability", average_episode_return_stability, self.total_num_steps
+        )
+        self.writter.add_scalar(
+            "train_episode_rewards_efficiency", average_episode_return_efficiency, self.total_num_steps
+        )
+        self.writter.add_scalar(
+            "train_episode_rewards_comfort", average_episode_return_comfort, self.total_num_steps
         )
         self.writter.add_scalar(
             "train_episode_speed", average_episode_speed, self.total_num_steps
