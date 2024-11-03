@@ -864,6 +864,8 @@ class OnPolicyBaseRunner:
                     (self.env_num, self.num_agents, 1), dtype=np.float32
                 )
                 rewards = 0
+                mean_v = 0
+                mean_acc = 0
                 while True:
                     eval_actions_collector = []
                     for agent_id in range(self.num_agents):
@@ -883,6 +885,12 @@ class OnPolicyBaseRunner:
                         eval_obs,
                         _,
                         eval_rewards,
+                        eval_mean_v,
+                        eval_mean_acc,
+                        eval_rewards_safety,
+                        eval_rewards_stability,
+                        eval_rewards_efficiency,
+                        eval_rewards_comfort,
                         eval_dones,
                         infos,
                         eval_available_actions,
@@ -890,6 +898,8 @@ class OnPolicyBaseRunner:
                     # print('Reward for each CAV:', eval_rewards)
                     # print()
                     rewards += eval_rewards[0][0]
+                    mean_v += eval_mean_v
+                    mean_acc += eval_mean_acc
                     eval_obs = np.expand_dims(np.array(eval_obs), axis=0)
                     eval_available_actions = (
                         np.expand_dims(np.array(eval_available_actions), axis=0)
@@ -903,6 +913,8 @@ class OnPolicyBaseRunner:
                     if np.all(eval_dones):
                         print(f"total reward of this episode: {rewards}")
                         print(f"Episode Step Time: {infos[0]['step_time']}")
+                        print(f"Episode Mean Speed: {mean_v/infos[0]['step_time']}")
+                        print(f"Episode Mean Acceleration: {mean_acc/infos[0]['step_time']}")
                         print(f"Collision: {infos[0]['collision']}")
                         print(f"Done Reason: {infos[0]['done_reason']}")
                         print('--------------------------------------')

@@ -242,7 +242,7 @@ class VehEnvWrapper(gym.Wrapper):
                 ego_heading = state['vehicle'][vehicle_id]['heading']
 
                 # 在当前车道上的前车
-                front_vehicle = traci.vehicle.getLeader(vehicle_id)
+                front_vehicle = traci.vehicle.getLeader(vehicle_id, 100)
                 if front_vehicle not in [None, ()] and front_vehicle[0] != '':  # 有可能是空的
                     front_vehicle_lane = traci.vehicle.getLaneID(front_vehicle[0])
                     front_vehicle_lane_index = int(front_vehicle_lane.split('_')[-1])
@@ -268,7 +268,7 @@ class VehEnvWrapper(gym.Wrapper):
                         surrounding_vehicle_2['front'] = (front_vehicle[0], veh_type, long_dist, 0, relative_speed, relative_accel, relative_heading, TTC, DRAC)
                         sorrounding_vehicle_4['front'] = (front_vehicle[0], veh_type, long_dist, 0, relative_speed, relative_accel, relative_heading, TTC, DRAC)
                         surrounding_vehicle_6['front'] = (front_vehicle[0], veh_type, long_dist, 0, relative_speed, relative_accel, relative_heading, TTC, DRAC)
-                        front_vehicle_expand = traci.vehicle.getLeader(front_vehicle[0])
+                        front_vehicle_expand = traci.vehicle.getLeader(front_vehicle[0], 100)
                         if front_vehicle_expand not in [None, ()] and front_vehicle_expand[0] != '':
                             relative_speed = ego_speed - traci.vehicle.getSpeed(front_vehicle_expand[0])
                             long_dist = traci.vehicle.getPosition(front_vehicle_expand[0])[0] - ego_long_pos - 5
@@ -284,7 +284,7 @@ class VehEnvWrapper(gym.Wrapper):
                                                                         0, relative_speed, relative_accel, relative_heading, TTC, DRAC)
                             surrounding_vehicle_6['front_expand_0'] = (front_vehicle_expand[0], expand_veh_type, long_dist,
                                                                         0, relative_speed, relative_accel, relative_heading, TTC, DRAC)
-                            front_vehicle_expand_exp = traci.vehicle.getLeader(front_vehicle_expand[0])
+                            front_vehicle_expand_exp = traci.vehicle.getLeader(front_vehicle_expand[0], 100)
                             if front_vehicle_expand_exp not in [None, ()] and front_vehicle_expand_exp[0] != '':
                                 relative_speed = ego_speed - traci.vehicle.getSpeed(front_vehicle_expand_exp[0])
                                 long_dist = traci.vehicle.getPosition(front_vehicle_expand_exp[0])[0] - ego_long_pos - 5
@@ -300,7 +300,7 @@ class VehEnvWrapper(gym.Wrapper):
                                                                           0, relative_speed, relative_accel, relative_heading, TTC, DRAC)
 
                 # 在当前车道上的后车
-                back_vehicle = traci.vehicle.getFollower(vehicle_id)
+                back_vehicle = traci.vehicle.getFollower(vehicle_id, 100)
                 if back_vehicle not in [None, ()] and back_vehicle[0] != '':  # 有可能是空的
                     back_vehicle_lane = traci.vehicle.getLaneID(back_vehicle[0])
                     back_vehicle_lane_index = int(back_vehicle_lane.split('_')[-1])
@@ -333,7 +333,7 @@ class VehEnvWrapper(gym.Wrapper):
                         surrounding_vehicle_2['back'] = (back_vehicle[0], veh_type, -(long_dist), 0, relative_speed, relative_accel, relative_heading, TTC, DRAC)
                         sorrounding_vehicle_4['back'] = (back_vehicle[0], veh_type, -(long_dist), 0, relative_speed, relative_accel, relative_heading, TTC, DRAC)
                         surrounding_vehicle_6['back'] = (back_vehicle[0], veh_type, -(long_dist), 0, relative_speed, relative_accel, relative_heading, TTC, DRAC)
-                        back_vehicle_expand = traci.vehicle.getFollower(back_vehicle[0])
+                        back_vehicle_expand = traci.vehicle.getFollower(back_vehicle[0], 100)
                         if back_vehicle_expand not in [None, ()] and back_vehicle_expand[0] != '':
                             relative_speed = ego_speed - traci.vehicle.getSpeed(back_vehicle_expand[0])
                             long_dist = ego_long_pos - traci.vehicle.getPosition(back_vehicle_expand[0])[0] - 5
@@ -351,7 +351,7 @@ class VehEnvWrapper(gym.Wrapper):
                                                                     0, relative_speed, relative_accel, relative_heading, TTC, DRAC)
                             surrounding_vehicle_6['back_expand_0'] = (back_vehicle_expand[0], expand_veh_type, -(long_dist),
                                                                     0, relative_speed, relative_accel, relative_heading, TTC, DRAC)
-                            back_vehicle_expand_exp = traci.vehicle.getFollower(back_vehicle_expand[0])
+                            back_vehicle_expand_exp = traci.vehicle.getFollower(back_vehicle_expand[0], 100)
                             if back_vehicle_expand_exp not in [None, ()] and back_vehicle_expand_exp[0] != '':
                                 relative_speed = ego_speed - traci.vehicle.getSpeed(back_vehicle_expand_exp[0])
                                 long_dist = ego_long_pos - traci.vehicle.getPosition(back_vehicle_expand_exp[0])[0] - 5
